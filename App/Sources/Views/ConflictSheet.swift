@@ -1,12 +1,11 @@
 import DockyardCore
 import SwiftUI
 
-/// "File exists": both files side by side, an action and an "Apply to" scope.
+/// "File exists": both files side by side, the seven rules and an "Apply to" scope.
 struct ConflictSheet: View {
     @Environment(AppModel.self) private var app
     let request: ConflictRequest
     @State private var scope = ConflictScope.thisFile
-    @State private var action = ConflictAction.overwrite
 
     var body: some View {
         let info = request.info
@@ -33,45 +32,47 @@ struct ConflictSheet: View {
                 card(title: "Existing", place: sides.last ?? "", path: info.destinationPath, size: info.destinationSize,
                      modified: info.destinationModified, newer: incomingNewer == false)
             }
-            HStack(spacing: 20) {
-                Picker("Action", selection: $action) {
-                    ForEach(Self.actions, id: \.self) { Text(Self.title($0)).tag($0) }
-                }
-                .frame(width: 250)
+            LabeledContent("Apply to") {
                 Picker("Apply to", selection: $scope) {
                     ForEach(ConflictScope.allCases, id: \.self) { Text($0.title).tag($0) }
                 }
-                .frame(width: 330)
+                .labelsHidden()
+                .frame(width: 250)
             }
             Divider()
-            HStack(spacing: 8) {
-                Button("Cancel Transfer") { resolve(.cancel) }
-                    .help("Stop this transfer\(scope == .thisFile ? "" : " and everything queued")")
-                Spacer()
-                if canResume {
-                    Button("Resume") { resolve(.resume) }
-                        .help("Append the rest of the file to the partial copy")
+            VStack(spacing: 8) {
+                HStack(spacing: 8) {
+                    ruleButton(.overwrite, isDefault: true)
+                    ruleButton(.overwriteIfNewer)
+                    ruleButton(.overwriteIfDifferent)
+                    ruleButton(.overwriteIfSizeDiffers)
                 }
-                if action != .skip {
-                    Button("Skip") { resolve(.skip) }
+                HStack(spacing: 8) {
+                    ruleButton(.resume)
+                        .disabled(!canResume)
+                        .help(canResume ? "Append the rest of the file to the partial copy" : "Only for a smaller, partial copy")
+                    ruleButton(.rename)
+                        .help("Keep both: the incoming file gets a numbered name")
+                    ruleButton(.skip)
+                    Button { resolve(.cancel) } label: { Text("Cancel Transfer").frame(maxWidth: .infinity) }
+                        .help("Stop this transfer\(scope == .thisFile ? "" : " and everything queued")")
                 }
-                Button(Self.title(action)) { resolve(action) }
-                    .keyboardShortcut(.defaultAction)
             }
+            .controlSize(.regular)
         }
         .padding(20)
         .frame(width: 640)
         .interactiveDismissDisabled()
     }
 
-    /// The prompt keeps the choices few; "overwrite if size differs" stays available as a default in Settings.
-    private static let actions: [ConflictAction] = [.overwrite, .overwriteIfNewer, .overwriteIfDifferent, .rename, .skip]
-
-    private static func title(_ action: ConflictAction) -> String { action == .rename ? "Keep both" : action.title }
-
     private var canResume: Bool {
         guard let incoming = request.info.sourceSize, let existing = request.info.destinationSize else { return false }
         return existing < incoming
+    }
+
+    private func ruleButton(_ action: ConflictAction, isDefault: Bool = false) -> some View {
+        Button { resolve(action) } label: { Text(action.title).frame(maxWidth: .infinity) }
+            .keyboardShortcut(isDefault ? .defaultAction : nil)
     }
 
     private func card(title: String, place: String, path: String, size: UInt64?, modified: Date?, newer: Bool) -> some View {
