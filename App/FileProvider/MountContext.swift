@@ -50,7 +50,7 @@ actor MountContext {
     private func loadConnection() async throws -> Connection {
         if let connection { return connection }
         let db = try DockyardDatabase.openReadOnly(path: AppGroup.databaseURL.path)
-        guard let record = try await ConnectionRepository(database: db).connection(id: connectionID) else {
+        guard let record = try await ConnectionRepository(database: db).connection(id: connectionID), record.deletedAt == nil else {
             throw MountError.unavailable("This connection no longer exists in Dockyard.")
         }
         let repository = ConnectionRepository(database: db)
