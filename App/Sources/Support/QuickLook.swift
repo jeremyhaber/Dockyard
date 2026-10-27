@@ -1,7 +1,8 @@
 import AppKit
 import ConnectionKit
 import DockyardCore
-import QuickLookUI
+import os
+@preconcurrency import QuickLookUI
 
 /// Space on a selected file shows Quick Look. Local files open in place; server files are downloaded into a
 /// cache first, asking before anything over `confirmAbove` bytes.
@@ -11,7 +12,7 @@ final class QuickLookCenter: NSObject, QLPreviewPanelDataSource, QLPreviewPanelD
     static let confirmAbove: UInt64 = 50 * 1_048_576
     private static let maxFiles = 12
 
-    private var urls: [URL] = []
+    private nonisolated let urls = OSAllocatedUnfairLock<[URL]>(initialState: [])
     private var task: Task<Void, Never>?
 
     func toggle(_ items: [RemoteItem], side: PaneSide, session: ConnectionSession) {
@@ -26,7 +27,7 @@ final class QuickLookCenter: NSObject, QLPreviewPanelDataSource, QLPreviewPanelD
             return
         }
         guard let fs = session.fs else { return }
-        if let big = files.first(where: { $0.size > Self.confirmAbove }) {
+        if let big = files.first(where: { ($0.size ?? 0) > Self.confirmAbove }) {
             let proceed = Dialogs.confirm(
                 title: "Preview \"\(big.name)\"?",
                 message: "It is \(FileDisplay.size(big.size)). Quick Look downloads the file to a cache on this Mac before showing it.",
@@ -52,7 +53,7 @@ final class QuickLookCenter: NSObject, QLPreviewPanelDataSource, QLPreviewPanelD
     }
 
     func show(_ files: [URL]) {
-        urls = files
+        urls.withLock { $0 = files }
         let panel = QLPreviewPanel.shared()!
         panel.dataSource = self
         panel.delegate = self
@@ -79,7 +80,7 @@ final class QuickLookCenter: NSObject, QLPreviewPanelDataSource, QLPreviewPanelD
         }
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         try? FileManager.default.removeItem(at: target)
-        if item.size > 1_048_576 {
+        if (item.size ?? 0) > 1_048_576 {
             AppModel.shared.showToast("Downloading \(item.name) for Quick Look", symbol: "arrow.down.circle")
         }
         try await fs.download(item.path, to: target, progress: Progress(totalUnitCount: 0))
@@ -106,10 +107,11 @@ final class QuickLookCenter: NSObject, QLPreviewPanelDataSource, QLPreviewPanelD
     // MARK: QLPreviewPanelDataSource
 
     nonisolated func numberOfPreviewItems(in panel: QLPreviewPanel!) -> Int {
-        MainActor.assumeIsolated { urls.count }
+        urls.withLock { $0.count }
     }
 
     nonisolated func previewPanel(_ panel: QLPreviewPanel!, previewItemAt index: Int) -> (any QLPreviewItem)! {
-        MainActor.assumeIsolated { index < urls.count ? urls[index] as NSURL : nil }
+        let list = urls.withLock { $0 }
+        return index < list.count ? list[index] as NSURL : nil
     }
 }

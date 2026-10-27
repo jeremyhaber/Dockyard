@@ -5,7 +5,7 @@ import SwiftUI
 /// Connections window can open the same dialogs.
 @MainActor
 enum SheetPresenter {
-    private final class Handle {
+    @MainActor private final class Handle {
         weak var parent: NSWindow?
         weak var sheet: NSWindow?
 
