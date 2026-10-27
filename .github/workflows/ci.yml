@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  packages-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: swift --version
+      - name: Build and test packages
+        run: |
+          set -e
+          for pkg in Packages/*/; do
+            echo "::group::$pkg"
+            (cd "$pkg" && swift build --build-tests && swift test)
+            echo "::endgroup::"
+          done
