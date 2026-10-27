@@ -65,11 +65,15 @@ private let t0 = Date(timeIntervalSince1970: 1_700_000_000)
         let siteProfile = TransferSite(id: id, label: "S", defaultConflict: site) { ep.fs }
         await q.register(site: siteProfile)
         let endpoint = siteProfile.endpoint(fs: ep.fs)
+        // Enqueue the whole batch before anything runs, as a drop does; otherwise the queue can go idle between
+        // items and forget an "all remaining" decision.
+        await q.pause()
         for name in names {
             await q.enqueue(TransferRequest(
                 source: env.local, sourcePath: env.path(name), destination: endpoint, destinationPath: "/d/\(name)",
                 modified: try? FileManager.default.attributesOfItem(atPath: env.path(name))[.modificationDate] as? Date))
         }
+        await q.resume()
         await q.waitUntilIdle()
         return q
     }
