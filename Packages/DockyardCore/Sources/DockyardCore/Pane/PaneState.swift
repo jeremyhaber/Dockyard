@@ -5,14 +5,14 @@ public enum SortKey: String, Sendable, Equatable, CaseIterable {
     case name, size, modified, permissions
 }
 
-public struct SortDescriptor: Sendable, Equatable {
+public struct FileSort: Sendable, Equatable {
     public var key: SortKey
     public var ascending: Bool
     public init(key: SortKey = .name, ascending: Bool = true) { self.key = key; self.ascending = ascending }
 
     /// Clicking a column header: same column flips direction, a new column starts ascending.
-    public func toggled(to newKey: SortKey) -> SortDescriptor {
-        newKey == key ? SortDescriptor(key: key, ascending: !ascending) : SortDescriptor(key: newKey)
+    public func toggled(to newKey: SortKey) -> FileSort {
+        newKey == key ? FileSort(key: key, ascending: !ascending) : FileSort(key: newKey)
     }
 }
 
@@ -22,9 +22,9 @@ public struct FolderTab: Sendable, Equatable, Identifiable {
     public private(set) var path: String
     public private(set) var backStack: [String]
     public private(set) var forwardStack: [String]
-    public var sort: SortDescriptor
+    public var sort: FileSort
 
-    public init(id: UUID = UUID(), path: String, sort: SortDescriptor = SortDescriptor()) {
+    public init(id: UUID = UUID(), path: String, sort: FileSort = FileSort()) {
         self.id = id
         self.path = PathTools.normalize(path)
         self.backStack = []
@@ -152,7 +152,7 @@ public struct PaneState: Sendable, Equatable {
         return navigate(to: target)
     }
 
-    public mutating func setSort(_ sort: SortDescriptor) { tabs[activeIndex].sort = sort }
+    public mutating func setSort(_ sort: FileSort) { tabs[activeIndex].sort = sort }
 
     /// If the folder disappeared (deleted elsewhere), go to the nearest existing ancestor.
     public mutating func recoverFromMissingFolder(exists: (String) -> Bool) {
@@ -180,7 +180,7 @@ public enum FileListModel {
     /// Folders first, then files, each ordered by `sort`. A `..` row leads unless at the root.
     public static func rows(
         for items: [RemoteItem], at path: String, rules: PathRules = .filesystem,
-        sort: SortDescriptor = SortDescriptor(), showHidden: Bool = true
+        sort: FileSort = FileSort(), showHidden: Bool = true
     ) -> [FileRow] {
         var out: [FileRow] = []
         if rules.hasParentRow(path) { out.append(.parent(path: rules.parent(of: path))) }
@@ -188,7 +188,7 @@ public enum FileListModel {
         return out
     }
 
-    public static func sorted(_ items: [RemoteItem], by sort: SortDescriptor) -> [RemoteItem] {
+    public static func sorted(_ items: [RemoteItem], by sort: FileSort) -> [RemoteItem] {
         func nameOrder(_ a: RemoteItem, _ b: RemoteItem) -> Bool {
             let r = a.name.compare(b.name, options: [.caseInsensitive, .numeric])
             return r == .orderedSame ? a.name < b.name : r == .orderedAscending

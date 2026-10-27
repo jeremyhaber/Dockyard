@@ -38,7 +38,7 @@ public struct FolderTree: Sendable, Equatable {
 
     /// Records a listing (folders only are kept).
     public mutating func setChildren(of path: String, from items: [RemoteItem]) {
-        let dirs = FileListModel.sorted(items.filter(\.isDirectory), by: SortDescriptor())
+        let dirs = FileListModel.sorted(items.filter(\.isDirectory), by: FileSort())
         let nodes = dirs.map { TreeNode(name: $0.name, path: RemotePath.join(path == "/" ? "" : path, $0.name), children: nil) }
         update(path) { node in
             // Keep state of children we already knew.

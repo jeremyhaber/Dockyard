@@ -89,10 +89,10 @@ import ConnectionKit
 
     @Test func openTabDefaultsToCurrentFolderAndInheritsSort() {
         var p = PaneState(initialPath: "/a")
-        p.setSort(SortDescriptor(key: .size, ascending: false))
+        p.setSort(FileSort(key: .size, ascending: false))
         p.openTab()
         #expect(p.currentPath == "/a")
-        #expect(p.activeTab.sort == SortDescriptor(key: .size, ascending: false))
+        #expect(p.activeTab.sort == FileSort(key: .size, ascending: false))
     }
 
     @Test func tabsKeepSeparateHistory() {
@@ -152,9 +152,9 @@ import ConnectionKit
     }
 
     @Test func naturalCaseInsensitiveNameSort() {
-        let names = FileListModel.sorted([item("file10"), item("File2"), item("file1")], by: SortDescriptor()).map(\.name)
+        let names = FileListModel.sorted([item("file10"), item("File2"), item("file1")], by: FileSort()).map(\.name)
         #expect(names == ["file1", "File2", "file10"])
-        let desc = FileListModel.sorted([item("a", dir: true), item("b"), item("c")], by: SortDescriptor(key: .name, ascending: false)).map(\.name)
+        let desc = FileListModel.sorted([item("a", dir: true), item("b"), item("c")], by: FileSort(key: .name, ascending: false)).map(\.name)
         #expect(desc == ["a", "c", "b"])  // folders stay first
     }
 
@@ -179,9 +179,9 @@ import ConnectionKit
     }
 
     @Test func sortToggle() {
-        let s = SortDescriptor()
-        #expect(s.toggled(to: .name) == SortDescriptor(key: .name, ascending: false))
-        #expect(s.toggled(to: .size) == SortDescriptor(key: .size, ascending: true))
+        let s = FileSort()
+        #expect(s.toggled(to: .name) == FileSort(key: .name, ascending: false))
+        #expect(s.toggled(to: .size) == FileSort(key: .size, ascending: true))
     }
 }
 

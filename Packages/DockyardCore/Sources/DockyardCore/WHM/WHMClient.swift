@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(Security)
+import Security
+#endif
 #if canImport(FoundationNetworking)
 import FoundationNetworking
 #endif
