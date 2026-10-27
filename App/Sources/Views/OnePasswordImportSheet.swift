@@ -67,8 +67,10 @@ struct OnePasswordImportSheet: View {
 
     private var subtitle: String {
         switch model.phase {
-        case .chooseVaults: "Choose the vaults to scan for Server, Login and SSH Key items."
-        case .scanning: "Reading items. 1Password may ask you to approve access."
+        case .chooseVaults:
+            return "Choose the vaults to scan for Server, Login and SSH Key items."
+        case .scanning:
+            return "Reading items. 1Password may ask you to approve access."
         case .preview, .applying:
             guard let preview = model.preview else { return "" }
             var parts = ["\(preview.newCount) new"]
@@ -76,7 +78,8 @@ struct OnePasswordImportSheet: View {
             parts.append("\(preview.duplicateCount) already saved and skipped")
             if !preview.warnings.isEmpty { parts.append("\(preview.warnings.count) warning\(preview.warnings.count == 1 ? "" : "s")") }
             return parts.joined(separator: ", ")
-        default: "Sites, passwords and SSH keys stay in 1Password."
+        default:
+            return "Sites, passwords and SSH keys stay in 1Password."
         }
     }
 
