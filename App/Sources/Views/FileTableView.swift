@@ -437,6 +437,10 @@ final class FileTableCoordinator: NSObject, NSTableViewDataSource, NSTableViewDe
         add("Delete…", #selector(menuDelete), enabled: hasSelection)
         add("New Folder…", #selector(menuNewFolder))
         menu.addItem(.separator())
+        // Archive actions arrive with the archive module.
+        add("Compress\u{2026} (coming soon)", #selector(menuRefresh), enabled: false)
+        add("Extract (coming soon)", #selector(menuRefresh), enabled: false)
+        menu.addItem(.separator())
         add("Copy Path", #selector(menuCopyPath), enabled: hasSelection)
         if pane.side == .server { add("Permissions…", #selector(menuChmod), enabled: hasSelection) }
         add("Refresh", #selector(menuRefresh))
@@ -503,8 +507,4 @@ final class FileTableCoordinator: NSObject, NSTableViewDataSource, NSTableViewDe
         Task { await session.chmod(items, mode: mode, in: side) }
     }
 
-    @objc private func menuRefresh() {
-        pane.invalidate()
-        pane.reload()
-    }
-}
+    @objc private func

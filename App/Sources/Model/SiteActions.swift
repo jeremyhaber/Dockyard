@@ -84,3 +84,12 @@ extension AppModel {
         }
     }
 }
+
+/// The transfer queue as the UI sees it. Views go through these so a paged queue can replace the snapshot later.
+extension AppModel {
+    func cancelTransfer(_ id: UUID) { let q = queue; Task { await q.cancel(id) } }
+    func retryTransfer(_ id: UUID) { let q = queue; Task { await q.retry(id) } }
+    func retryFailedTransfers() { let q = queue; Task { await q.retryFailed() } }
+    func clearFinishedTransfers() { let q = queue; Task { await q.removeFinished() } }
+    func cancelAllTransfers() { let q = queue; Task { await q.cancelAll() } }
+}

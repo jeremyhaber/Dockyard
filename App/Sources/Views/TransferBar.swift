@@ -121,10 +121,10 @@ struct QueuePopover: View {
             HStack {
                 Text("Transfers").font(.headline)
                 Spacer()
-                Button("Retry failed") { Task { await app.queue.retryFailed() } }
+                Button("Retry failed") { app.retryFailedTransfers() }
                     .disabled(snapshot.failedCount == 0)
-                Button("Clear finished") { Task { await app.queue.removeFinished() } }
-                Button("Cancel all") { Task { await app.queue.cancelAll() } }
+                Button("Clear finished") { app.clearFinishedTransfers() }
+                Button("Cancel all") { app.cancelAllTransfers() }
                     .disabled(snapshot.isIdle)
             }
             .controlSize(.small)
@@ -182,13 +182,13 @@ struct JobRow: View {
                 .foregroundStyle(Palette.textSecondary)
             if job.state == .queued || job.state == .running {
                 Button {
-                    Task { await app.queue.cancel(job.id) }
+                    app.cancelTransfer(job.id)
                 } label: { Image(systemName: "xmark.circle") }
                     .buttonStyle(.borderless)
                     .accessibilityLabel("Cancel \(job.name)")
             } else if job.state == .failed || job.state == .cancelled {
                 Button {
-                    Task { await app.queue.retry(job.id) }
+                    app.retryTransfer(job.id)
                 } label: { Image(systemName: "arrow.clockwise") }
                     .buttonStyle(.borderless)
                     .accessibilityLabel("Retry \(job.name)")
