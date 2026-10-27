@@ -46,6 +46,7 @@ final class ConnectionSession: Identifiable {
     var rootBrowsingOverride = false
 
     @ObservationIgnored private var terminalController: TerminalController?
+    @ObservationIgnored private var suppressedKinds: Set<OperationKind> = []
     @ObservationIgnored var onSessionChange: ((ConnectionSession) -> Void)?
     @ObservationIgnored var connectTask: Task<Void, Never>?
     @ObservationIgnored private var logTask: Task<Void, Never>?
@@ -185,6 +186,7 @@ final class ConnectionSession: Identifiable {
     }
 
     func createFolder(named name: String, in side: PaneSide) async {
+        guard await authorize(.mkdir, paths: [name], side: side) else { return }
         await run("New folder", side: side) { pane in
             let path = RemotePath.join(pane.currentPath, name)
             try await pane.fs.mkdir(path)
@@ -195,6 +197,7 @@ final class ConnectionSession: Identifiable {
 
     func rename(_ item: RemoteItem, to newName: String, in side: PaneSide) async {
         guard newName != item.name, !newName.isEmpty else { return }
+        guard await authorize(.rename, paths: [item.path], side: side) else { return }
         await run("Rename", side: side) { pane in
             let target = RemotePath.join(RemotePath.parent(of: item.path), newName)
             try await pane.fs.rename(item.path, target)
@@ -207,6 +210,7 @@ final class ConnectionSession: Identifiable {
 
     /// Server deletes are real deletes. Local deletes go to the macOS Trash.
     func delete(_ items: [RemoteItem], in side: PaneSide) async {
+        guard await authorize(.delete, paths: items.map(\.path), side: side) else { return }
         await run("Delete", side: side) { pane in
             for item in items {
                 if side == .local, !DemoMode.isEnabled {
@@ -221,6 +225,7 @@ final class ConnectionSession: Identifiable {
     }
 
     func chmod(_ items: [RemoteItem], mode: UInt16, in side: PaneSide) async {
+        guard await authorize(.chmod, paths: items.map(\.path), side: side) else { return }
         await run("Change permissions", side: side) { pane in
             for item in items {
                 try await pane.fs.chmod(item.path, mode: mode)
@@ -234,6 +239,7 @@ final class ConnectionSession: Identifiable {
 
     /// Moves items to another folder on the same file system.
     func move(_ items: [RemoteItem], to directory: String, in side: PaneSide) async {
+        guard await authorize(.move, paths: items.map(\.path), side: side) else { return }
         await run("Move", side: side) { pane in
             for item in items {
                 let target = RemotePath.join(directory, item.name)
@@ -242,6 +248,30 @@ final class ConnectionSession: Identifiable {
                     ChangeEntry(scope: self.scope(side), kind: .move, fromPath: item.path, toPath: target, isDirectory: item.isDirectory),
                     side: side)
             }
+        }
+    }
+
+    // MARK: Guardrails
+
+    /// Read-only refusals and PROD confirmations for server writes. Local operations are never guarded.
+    func authorize(_ kind: OperationKind, paths: [String], side: PaneSide = .server) async -> Bool {
+        guard side == .server else { return true }
+        switch Guardrails.decide(GuardedOperation(kind, paths: paths), for: connection, suppressed: suppressedKinds) {
+        case .allow:
+            return true
+        case .deny(let reason):
+            log.append(.warning, reason)
+            operationError = reason
+            return false
+        case .confirm(let summary):
+            var message = "\(connection.name) is a PROD site."
+            if summary.hiddenCount > 0 { message += " \(summary.hiddenCount) more are not listed." }
+            let request = ConfirmRequest(
+                title: summary.title, message: message, confirmTitle: kind == .delete ? "Delete" : "Overwrite",
+                items: summary.items, suppressTitle: summary.canSuppressForSession ? "Don\u{2019}t ask again for this session" : nil)
+            let answer = await AppModel.shared.prompts.askConfirmDetailed(request)
+            if answer.confirmed, answer.suppress { suppressedKinds.insert(kind) }
+            return answer.confirmed
         }
     }
 

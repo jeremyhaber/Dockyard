@@ -213,6 +213,13 @@ struct ConnectionTab: View {
                 .lineLimit(1)
             if session.connection.isProd { Badge(text: "PROD", style: .prod) }
             if session.connection.protocol == .rclone { Badge(text: "CLOUD", style: .cloud) }
+            if session.connection.readOnly {
+                Image(systemName: "lock.fill")
+                    .font(.system(size: 9))
+                    .foregroundStyle(Palette.textSecondary)
+                    .help("Read-only: uploads, deletes, renames and permission changes are blocked")
+                    .accessibilityLabel("Read-only")
+            }
             Button {
                 app.close(session)
             } label: {

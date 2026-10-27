@@ -62,6 +62,7 @@ struct SiteDraft {
     var mountInFinder = false
     var mountOnLaunch = false
     var mountReadOnly = false
+    var readOnly = false
     var localFolder = ""
     var restoreSession = true
 
@@ -102,6 +103,7 @@ struct SiteDraft {
         mountInFinder = c.mountInFinder
         mountOnLaunch = c.mountOnLaunch
         mountReadOnly = c.mountReadOnly
+        readOnly = c.readOnly
         localFolder = c.localFolder ?? ""
         restoreSession = c.restoreSession
         if let cloud = c.cloud {
@@ -162,6 +164,7 @@ struct SiteDraft {
         c.mountInFinder = mountInFinder
         c.mountOnLaunch = mountOnLaunch
         c.mountReadOnly = mountReadOnly
+        c.readOnly = readOnly
         c.localFolder = localFolder.trimmingCharacters(in: .whitespaces).isEmpty ? nil : localFolder
         c.restoreSession = restoreSession
         c.cloud = isCloud ? cloudPreset.spec(root: cloudRoot, region: cloudRegion) : nil

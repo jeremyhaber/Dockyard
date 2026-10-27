@@ -156,6 +156,9 @@ struct SiteEditorSheet: View {
 
     private var otherSection: some View {
         Section("Other") {
+            Toggle("Read-only site", isOn: $draft.readOnly)
+            Text("Blocks uploads, deletes, renames and permission changes, and shows a lock on the connection tab.")
+                .font(.caption).foregroundStyle(Palette.textSecondary)
             Toggle("Production site (PROD)", isOn: Binding(
                 get: { draft.isProd },
                 set: { value in

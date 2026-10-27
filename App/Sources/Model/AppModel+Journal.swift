@@ -41,6 +41,11 @@ extension AppModel {
         let destinationID = destination.id
         Task {
             let existing = Set(((try? await to.fs.list(directory)) ?? []).map(\.name))
+            if destinationSide == .server {
+                guard await destination.authorize(.upload, paths: items.map { RemotePath.join(directory, $0.name) }) else { return }
+                let clashes = items.filter { existing.contains($0.name) }.map { RemotePath.join(directory, $0.name) }
+                if !clashes.isEmpty, !(await destination.authorize(.overwrite, paths: clashes)) { return }
+            }
             let ids = await queue.enqueue(items: items, from: from, to: to, into: directory, move: move)
             for (id, item) in zip(ids, items) where !item.isDirectory && !existing.contains(item.name) {
                 pendingJournal[id] = PendingChange(
@@ -113,6 +118,7 @@ extension AppModel {
         _ entry: ChangeEntry, redo: Bool, session: ConnectionSession, side: PaneSide, resolution: UndoResolution? = nil
     ) async {
         guard let pane = session.pane(side), let id = entry.id else { return }
+        guard await session.authorize(.move, paths: [entry.toPath], side: side) else { return }
         let undoer = ChangeUndoer(fs: pane.fs)
         let verb = redo ? "Redo" : "Undo"
         do {

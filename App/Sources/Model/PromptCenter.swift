@@ -32,6 +32,15 @@ struct ConfirmRequest: Identifiable, Equatable {
     var confirmTitle: String
     var cancelTitle = "Cancel"
     var symbol = "exclamationmark.shield"
+    /// Paths or names the question is about, listed under the message.
+    var items: [String] = []
+    /// When set, the sheet offers "Don't ask again for this session" with this label.
+    var suppressTitle: String?
+}
+
+struct ConfirmAnswer: Equatable {
+    var confirmed: Bool
+    var suppress: Bool
 }
 
 enum ActivePrompt: Identifiable, Equatable {
@@ -58,7 +67,7 @@ final class PromptCenter {
     private(set) var hostKeys: [HostKeyRequest] = []
     private(set) var confirmations: [ConfirmRequest] = []
 
-    @ObservationIgnored private var confirmWaiters: [UUID: CheckedContinuation<Bool, Never>] = [:]
+    @ObservationIgnored private var confirmWaiters: [UUID: CheckedContinuation<ConfirmAnswer, Never>] = [:]
     @ObservationIgnored private var conflictWaiters: [UUID: CheckedContinuation<ConflictDecision, Never>] = [:]
     @ObservationIgnored private var passwordWaiters: [UUID: CheckedContinuation<String?, Never>] = [:]
     @ObservationIgnored private var hostKeyWaiters: [UUID: CheckedContinuation<Bool, Never>] = [:]
@@ -113,14 +122,18 @@ final class PromptCenter {
 
     /// A yes/no question. True when the user confirms.
     func askConfirm(_ request: ConfirmRequest) async -> Bool {
+        await askConfirmDetailed(request).confirmed
+    }
+
+    func askConfirmDetailed(_ request: ConfirmRequest) async -> ConfirmAnswer {
         await withCheckedContinuation { continuation in
             confirmWaiters[request.id] = continuation
             confirmations.append(request)
         }
     }
 
-    func resolveConfirm(_ id: UUID, confirmed: Bool) {
+    func resolveConfirm(_ id: UUID, confirmed: Bool, suppress: Bool = false) {
         confirmations.removeAll { $0.id == id }
-        confirmWaiters.removeValue(forKey: id)?.resume(returning: confirmed)
+        confirmWaiters.removeValue(forKey: id)?.resume(returning: ConfirmAnswer(confirmed: confirmed, suppress: suppress))
     }
 }

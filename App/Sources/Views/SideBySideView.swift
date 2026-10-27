@@ -111,6 +111,7 @@ struct ServerColumn: View {
             if session.connection.isProd { Badge(text: "PROD", style: .prod) }
             if session.connection.protocol == .rclone { Badge(text: "CLOUD", style: .cloud) }
             if session.browsingAsRoot { Badge(text: "ROOT", style: .root) }
+            if session.connection.readOnly { Image(systemName: "lock.fill").font(.system(size: 9)).accessibilityLabel("Read-only") }
             Spacer()
             if canRemove {
                 Button { app.removeColumn(session.id) } label: { Image(systemName: "xmark").font(.system(size: 9, weight: .bold)) }
