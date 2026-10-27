@@ -25,7 +25,7 @@ jobs:
           for pkg in Packages/*/; do
             echo "::group::$pkg"
             (cd "$pkg" && { swift build --build-tests && swift test; } 2>&1 | tee "$RUNNER_TEMP/test.log"; exit ${PIPESTATUS[0]}) || {
-              grep -E -A3 "recorded an issue|Fatal error|error: " "$RUNNER_TEMP/test.log" | grep -vE "^--$|started\.$" | head -80 | while IFS= read -r line; do echo "::error title=$pkg::$line"; done
+              grep -E "recorded an issue|Fatal error|error: " "$RUNNER_TEMP/test.log" | head -80 | while IFS= read -r line; do echo "::error title=$pkg::$line"; done
               exit 1
             }
             echo "::endgroup::"

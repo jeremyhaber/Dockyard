@@ -62,6 +62,8 @@ struct ArchiveCommand: Sendable, Equatable {
     var argv: [String]
     /// Working directory; relative operands are resolved against it.
     var directory: String?
+    /// Extra environment for local runs only (not part of `shellLine`).
+    var environment: [String: String] = [:]
 
     var shellLine: String {
         let call = ShellQuote.join(argv)
@@ -96,16 +98,18 @@ enum ArchiveCommands {
         _ format: ArchiveFormat, directory: String, names: [String], archive: String, available: Set<String>
     ) -> ArchiveCommand {
         let items = names.map(operand)
+        // macOS tar otherwise stores extended attributes as AppleDouble "._" entries; harmless elsewhere.
+        let noAppleDouble = ["COPYFILE_DISABLE": "1"]
         switch format {
         case .zip:
             if available.contains("zip") || !available.contains("bsdtar") {
                 return ArchiveCommand(argv: ["zip", "-r", "-y", "-nw", archive] + items, directory: directory)
             }
             return ArchiveCommand(argv: ["bsdtar", "-c", "--format", "zip", "-f", archive] + items, directory: directory)
-        case .tar: return ArchiveCommand(argv: ["tar", "-cf", archive, "--"] + items, directory: directory)
-        case .tarGz: return ArchiveCommand(argv: ["tar", "-czf", archive, "--"] + items, directory: directory)
-        case .tarBz2: return ArchiveCommand(argv: ["tar", "-cjf", archive, "--"] + items, directory: directory)
-        case .tarXz: return ArchiveCommand(argv: ["tar", "-cJf", archive, "--"] + items, directory: directory)
+        case .tar: return ArchiveCommand(argv: ["tar", "-cf", archive, "--"] + items, directory: directory, environment: noAppleDouble)
+        case .tarGz: return ArchiveCommand(argv: ["tar", "-czf", archive, "--"] + items, directory: directory, environment: noAppleDouble)
+        case .tarBz2: return ArchiveCommand(argv: ["tar", "-cjf", archive, "--"] + items, directory: directory, environment: noAppleDouble)
+        case .tarXz: return ArchiveCommand(argv: ["tar", "-cJf", archive, "--"] + items, directory: directory, environment: noAppleDouble)
         }
     }
 
