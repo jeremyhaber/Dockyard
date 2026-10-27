@@ -14,12 +14,12 @@ struct SettingsView: View {
                 Stepper(value: $maxConnections, in: AppSettings.globalMaxRange) {
                     LabeledContent("Maximum connections", value: "\(maxConnections)")
                 }
-                Text("The most transfers running at once across all sites. Each site also has its own limit.")
+                Text("Transfers running at once across all sites. Each site has its own limit too.")
                     .font(.caption).foregroundStyle(Palette.textSecondary)
             }
             Section("Logging") {
                 Toggle("Write a log file for each connection", isOn: $writeLogFiles)
-                Text("Files are kept in ~/Library/Logs/Dockyard and rotate automatically. Applies to connections opened from now on.")
+                Text("Kept in ~/Library/Logs/Dockyard. Applies to connections opened from now on.")
                     .font(.caption).foregroundStyle(Palette.textSecondary)
             }
             Section("Local folder") {
@@ -28,14 +28,14 @@ struct SettingsView: View {
                     Button("Choose\u{2026}") { chooseFolder() }
                     if !localFolder.isEmpty { Button("Clear") { localFolder = "" } }
                 }
-                Text("Where the local pane starts when a connection has no folder of its own and no session to restore.")
+                Text("Used when a connection has no local folder and no session to restore.")
                     .font(.caption).foregroundStyle(Palette.textSecondary)
             }
             Section("Finder") {
                 Stepper(value: $pollSeconds, in: 5...3600, step: 5) {
                     LabeledContent("Check for server changes every", value: "\(Int(pollSeconds)) seconds")
                 }
-                Text("Mounted connections have no change notifications, so the Finder extension re-lists the folders Finder is showing.")
+                Text("SFTP and FTP cannot push changes, so the extension re-lists the open folders.")
                     .font(.caption).foregroundStyle(Palette.textSecondary)
             }
             Section("WHM") {
@@ -45,7 +45,7 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 520, height: 640)
+        .frame(width: 520, height: 600)
         .background(WindowAccessor { window in DemoWindows.register("settings", window) })
     }
 
