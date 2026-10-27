@@ -268,7 +268,7 @@ struct CompareRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Toggle("Select \(entry.name)", isOn: Binding(get: { selected }, set: onToggle))
+            Toggle("Select \(entry.name)", isOn: Binding(get: { selected }, set: { onToggle($0) }))
                 .labelsHidden()
                 .toggleStyle(.checkbox)
                 .frame(width: 20)

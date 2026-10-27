@@ -24,7 +24,10 @@ jobs:
           set -e
           for pkg in Packages/*/; do
             echo "::group::$pkg"
-            (cd "$pkg" && swift build --build-tests && swift test)
+            (cd "$pkg" && swift build --build-tests && swift test 2>&1 | tee "$RUNNER_TEMP/test-$(basename "$pkg").log"; test "${PIPESTATUS[0]}" = 0) || {
+              grep -E "✘|error:|Issue recorded" "$RUNNER_TEMP/test-$(basename "$pkg").log" | sort -u | head -30 | while IFS= read -r line; do echo "::error::$line"; done
+              exit 1
+            }
             echo "::endgroup::"
           done
 
