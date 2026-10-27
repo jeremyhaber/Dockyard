@@ -88,6 +88,11 @@ public actor TransferQueue {
     var lastRateSample: (time: Date, bytes: UInt64)?
     var smoothedRate = 0.0
 
+    /// Folder children skipped by transfer filters (in memory; reset by `removeFinished`).
+    var filteredCount = 0
+    /// Source path of each expanding top-level folder, to turn child paths into paths relative to the transfer root.
+    var rootPaths: [Int64: String] = [:]
+
     var resolving = false
     var resolveWaiters: [CheckedContinuation<Void, Never>] = []
 
@@ -575,6 +580,7 @@ public actor TransferQueue {
         stats.add(record)
         persist(record)
         trackers.removeValue(forKey: record.id)
+        if record.parentId == nil { rootPaths.removeValue(forKey: record.id) }
         if let parent = record.parentId {
             if !record.isDirectory, state == .completed { rollupDone[record.rootId, default: 0] += Int64(clamping: record.bytesDone) }
             childFinished(parent, state: state)
@@ -610,9 +616,10 @@ public actor TransferQueue {
         if rec.createParents { try await Self.ensureDirectory(route.dst, RemotePath.parent(of: rec.destPath)) }
 
         let resume = rec.resume
+        var replacing = false
         if !resume, let existing = try await route.dst.lookup(rec.destPath) {
             switch try await resolveConflict(job, existing: existing, route: route) {
-            case .proceed: break
+            case .proceed: replacing = job.record.destPath == rec.destPath
             case .skip:
                 log.emit(.status, "Skipped \(job.record.name): already exists")
                 return .skipped
@@ -622,6 +629,9 @@ public actor TransferQueue {
             }
         }
         job.record.resume = false
+        if replacing, let hook = job.record.dstSite.flatMap({ sites[$0]?.profile?.beforeOverwrite }) {
+            try await hook(job.record.destPath, route.dst)
+        }
         if job.record.modified == nil && preserveTimestamps {
             job.record.modified = try? await route.src.lookup(rec.sourcePath)?.modified
         }
@@ -638,10 +648,28 @@ public actor TransferQueue {
         try await Self.perform(req, route: route, resume: resume, tempRoot: tempDirectory,
                                preserveTimestamps: preserveTimestamps, interval: progressInterval, sample: sample)
         if job.cancelRequested { throw CancellationError() }
+        try await verifyChecksum(job.record, route)
         job.record.bytesDone = max(job.progressDone, job.record.bytesTotal)
         if req.deleteSource { try await route.src.delete(req.sourcePath, recursive: false) }
         log.emit(.status, "Completed \(req.name) (\(req.route))")
         return .completed
+    }
+
+    /// After an upload or download on a site that asks for it. Server to server copies are not checked.
+    private func verifyChecksum(_ rec: JobRecord, _ route: Route) async throws {
+        guard (rec.srcSite == nil) != (rec.dstSite == nil) else { return }
+        let uploading = rec.srcSite == nil
+        guard let key = uploading ? rec.dstSite : rec.srcSite, sites[key]?.profile?.verifyChecksums == true else { return }
+        let result = await ChecksumVerifier.verify(
+            local: URL(fileURLWithPath: uploading ? rec.sourcePath : rec.destPath),
+            remote: uploading ? rec.destPath : rec.sourcePath, on: uploading ? route.dst : route.src)
+        switch result {
+        case .match: log.emit(.status, "Verified checksum of \(rec.name)")
+        case .unavailable(let reason): log.emit(.warning, "Checksum of \(rec.name) not verified: \(reason)")
+        case .mismatch(let local, let remote):
+            log.emit(.error, "Checksum mismatch for \(rec.name): this Mac \(local), server \(remote)")
+            throw RemoteError.protocolError("Checksum mismatch: the copy on the server differs from the local file")
+        }
     }
 
     private func updateTotal(_ job: ActiveJob, size: UInt64) {

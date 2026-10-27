@@ -34,11 +34,22 @@ public struct TransferSite: Sendable {
     public var connectDelayMs: Int
     /// Creates a new, not yet connected session. The queue connects it and closes it when idle.
     public var makeSession: @Sendable () async throws -> any RemoteFileSystem
+    /// Skip rules for the children of folder transfers on this site.
+    public var filter: TransferFilter
+    /// Runs before an upload replaces an existing file (the safety net keeps the old version). Throwing fails the item.
+    public var beforeOverwrite: (@Sendable (_ path: String, _ fs: any RemoteFileSystem) async throws -> Void)?
+    /// Compare SHA-256 of the local and remote copy after each upload or download; a mismatch fails the item.
+    public var verifyChecksums: Bool
 
     public init(
         id: UUID, label: String, maxConnections: Int = Connection.defaultMaxConnections, connectDelayMs: Int = 0,
+        filter: TransferFilter = .none, verifyChecksums: Bool = false,
+        beforeOverwrite: (@Sendable (_ path: String, _ fs: any RemoteFileSystem) async throws -> Void)? = nil,
         makeSession: @escaping @Sendable () async throws -> any RemoteFileSystem
     ) {
+        self.filter = filter
+        self.verifyChecksums = verifyChecksums
+        self.beforeOverwrite = beforeOverwrite
         self.id = id
         self.label = label
         self.maxConnections = min(max(1, maxConnections), 10)
@@ -46,9 +57,14 @@ public struct TransferSite: Sendable {
         self.makeSession = makeSession
     }
 
-    public init(connection: Connection, makeSession: @escaping @Sendable () async throws -> any RemoteFileSystem) {
+    public init(
+        connection: Connection, filter: TransferFilter = .none, verifyChecksums: Bool = false,
+        beforeOverwrite: (@Sendable (_ path: String, _ fs: any RemoteFileSystem) async throws -> Void)? = nil,
+        makeSession: @escaping @Sendable () async throws -> any RemoteFileSystem
+    ) {
         self.init(id: connection.id, label: connection.name, maxConnections: connection.maxConnections,
-                  connectDelayMs: connection.connectDelayMs, makeSession: makeSession)
+                  connectDelayMs: connection.connectDelayMs, filter: filter, verifyChecksums: verifyChecksums,
+                  beforeOverwrite: beforeOverwrite, makeSession: makeSession)
     }
 
     /// The endpoint to put in a `TransferRequest`. `fs` is only a fallback; see `TransferEndpoint.siteId`.

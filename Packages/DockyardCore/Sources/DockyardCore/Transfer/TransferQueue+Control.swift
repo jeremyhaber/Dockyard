@@ -119,6 +119,7 @@ extension TransferQueue {
                 """)
         }
         reloadStats()
+        filteredCount = 0
         publishSoon()
     }
 
