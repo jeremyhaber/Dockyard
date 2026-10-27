@@ -34,16 +34,20 @@ public struct TransferRequest: Sendable {
     public var recursive: Bool
     /// Delete the source after a successful copy (move).
     public var deleteSourceAfter: Bool
+    /// Overrides the queue's conflict policy for this request (sync plans overwrite on purpose).
+    public var conflictOverride: ConflictPolicy?
 
     public init(
         source: TransferEndpoint, sourcePath: String, destination: TransferEndpoint, destinationPath: String,
         isDirectory: Bool = false, size: UInt64? = nil, modified: Date? = nil,
-        createParents: Bool = false, recursive: Bool = true, deleteSourceAfter: Bool = false
+        createParents: Bool = false, recursive: Bool = true, deleteSourceAfter: Bool = false,
+        conflictOverride: ConflictPolicy? = nil
     ) {
         self.source = source; self.sourcePath = sourcePath
         self.destination = destination; self.destinationPath = destinationPath
         self.isDirectory = isDirectory; self.size = size; self.modified = modified
         self.createParents = createParents; self.recursive = recursive; self.deleteSourceAfter = deleteSourceAfter
+        self.conflictOverride = conflictOverride
     }
 
     public var route: String { "\(source.label) → \(destination.label)" }

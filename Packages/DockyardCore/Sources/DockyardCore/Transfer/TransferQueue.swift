@@ -385,7 +385,7 @@ public actor TransferQueue {
             resolving = false
             if !resolveWaiters.isEmpty { resolveWaiters.removeFirst().resume() }
         }
-        switch conflictPolicy {
+        switch job.request.conflictOverride ?? conflictPolicy {
         case .overwrite: return .overwrite
         case .overwriteIfNewer: return .overwriteIfNewer
         case .skip: return .skip
