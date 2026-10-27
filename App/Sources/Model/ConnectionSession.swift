@@ -122,7 +122,7 @@ final class ConnectionSession: Identifiable {
     func endpoint(_ side: PaneSide) -> TransferEndpoint {
         switch side {
         case .local: TransferEndpoint(fs: localFS, label: "This Mac")
-        case .server: TransferEndpoint(fs: fs ?? localFS, label: connection.name)
+        case .server: TransferEndpoint(fs: fs ?? localFS, label: connection.name, siteId: connection.id)
         }
     }
 

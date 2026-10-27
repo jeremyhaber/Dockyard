@@ -1,3 +1,4 @@
+import AppKit
 import ConnectionKit
 import DockyardCore
 import Foundation
@@ -112,13 +113,76 @@ final class AppModel {
         self.sessionService = SessionService(repository: sessionRepo, saver: SessionSaver(repository: sessionRepo))
         self.whmSync = WHMSyncService(repository: repo, sources: sources, secrets: secrets)
         self.prompts = prompts
-        self.queue = TransferQueue(maxConcurrent: demo ? 1 : 3, conflictPolicy: .ask, resolver: { info in await prompts.askConflict(info) })
+        // The queue keeps its jobs in the app database, opens its own pooled sessions per registered site and
+        // starts restored jobs paused until `offerToResumeTransfers` has asked.
+        let siteHost = QueueSiteHost()
+        self.queueSiteHost = siteHost
+        let siteProvider: (@Sendable (UUID) async -> TransferSite?)? = demo ? nil : { id in
+            guard let connection = try? await repo.connection(id: id) else { return nil }
+            return await siteHost.model?.transferSite(for: connection)
+        }
+        self.queue = TransferQueue(
+            maxConcurrent: demo ? 1 : 10, conflictPolicy: .ask, resolver: { info in await prompts.askConflict(info) },
+            database: db, siteProvider: siteProvider)
         self.startupError = startup
+        siteHost.model = self
         startObserving()
         if demo {
             Task { await DemoSeeder.run(self) }
         } else {
             startWHMScheduler()
+            Task { await offerToResumeTransfers() }
+        }
+    }
+
+    /// Lets the queue's `siteProvider` reach the model, which does not exist yet while the queue is created.
+    @ObservationIgnored private let queueSiteHost: QueueSiteHost
+
+    private final class QueueSiteHost: @unchecked Sendable {
+        @MainActor weak var model: AppModel?
+    }
+
+    // MARK: Transfer queue sites
+
+    /// What the queue needs to open extra pooled connections to `connection` (limits, back-off and
+    /// persistence across restarts all hang off this registration).
+    func transferSite(for connection: Connection) -> TransferSite {
+        TransferSite(connection: connection) { [weak self] in
+            guard let self else { throw AppError.cancelled }
+            return try await self.makeQueueSession(for: connection)
+        }
+    }
+
+    private func makeQueueSession(for connection: Connection) throws -> any RemoteFileSystem {
+        let log = session(for: connection.id)?.log ?? LogBuffer()
+        let validator = hostKeyValidator(host: connection.host, port: connection.port, log: log)
+        return try FileSystemFactory.make(for: connection, secrets: secrets, hostKeyValidator: validator)
+    }
+
+    private func registerTransferSite(_ connection: Connection) {
+        let site = transferSite(for: connection)
+        let queue = queue
+        Task { await queue.register(site: site) }
+    }
+
+    /// Restored unfinished jobs start paused; ask before they hit the network.
+    private func offerToResumeTransfers() async {
+        let count = await queue.restoredJobCount
+        guard count > 0 else { return }
+        let alert = NSAlert()
+        alert.messageText = "Resume \(count) unfinished transfer\(count == 1 ? "" : "s")?"
+        alert.informativeText = "Dockyard was closed while transfers were still queued. They are paused until you resume them."
+        alert.addButton(withTitle: "Resume")
+        alert.addButton(withTitle: "Keep Paused")
+        alert.addButton(withTitle: "Discard")
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            await queue.resume()
+        case .alertThirdButtonReturn:
+            await queue.cancelAll()
+            await queue.removeFinished()
+        default:
+            break
         }
     }
 
@@ -176,6 +240,7 @@ final class AppModel {
         for session in sessions {
             if let updated = byID[session.connection.id], updated != session.connection {
                 session.updateConnection(updated)
+                registerTransferSite(updated)
             }
         }
     }
@@ -223,6 +288,7 @@ final class AppModel {
             return
         }
         let session = ConnectionSession(connection: connection)
+        registerTransferSite(connection)
         session.onSessionChange = { [weak self] in self?.persist($0) }
         sessions.append(session)
         activeSessionID = session.id
@@ -296,6 +362,7 @@ final class AppModel {
             if let state = session.sessionState() { await sessionService.saver.update(state) }
         }
         await sessionService.saver.flushAll()
+        await queue.shutdown()
         for session in sessions { await session.fs?.disconnect() }
     }
 
