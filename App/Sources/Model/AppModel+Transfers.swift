@@ -32,6 +32,8 @@ enum TransferTab: String, CaseIterable, Identifiable {
 @MainActor @Observable
 final class TransferCenter {
     var tab: TransferTab = .active
+    /// The folder job whose files the table shows, if one is open.
+    var folder: TransferJobInfo?
     @ObservationIgnored var lastFailed: Int?
     @ObservationIgnored var appliedFilters: String?
 }

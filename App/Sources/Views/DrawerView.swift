@@ -23,20 +23,28 @@ struct DrawerView: View {
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
-                .frame(width: 270)
-                if app.drawerTab == .terminal, let session, session.status.isConnected, session.shellAvailable {
-                    terminalControls(session)
-                }
-                Spacer()
-                if app.drawerTab == .log {
+                .frame(width: 240)
+                switch app.drawerTab {
+                case .log:
+                    Spacer(minLength: 0)
                     Toggle("Errors only", isOn: $errorsOnly)
                         .toggleStyle(.checkbox)
                     Button("Copy") { copy() }
-                        .controlSize(.small)
                         .disabled(!hasLines)
                     Button("Clear") { session?.log.clear() }
-                        .controlSize(.small)
                         .disabled(!hasLines)
+                case .terminal:
+                    if let session, session.status.isConnected, session.shellAvailable {
+                        ViewThatFits(in: .horizontal) {
+                            terminalControls(session, iconOnly: false)
+                            terminalControls(session, iconOnly: true)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                    } else {
+                        Spacer(minLength: 0)
+                    }
+                case .transfers:
+                    TransfersHeader()
                 }
                 Button {
                     app.drawerVisible = false
@@ -46,8 +54,9 @@ struct DrawerView: View {
                 .buttonStyle(.borderless)
                 .accessibilityLabel("Close drawer")
             }
+            .controlSize(.small)
             .padding(.horizontal, 10)
-            .frame(height: 30)
+            .frame(height: 32)
             .background(Palette.drawer)
             Group {
                 switch app.drawerTab {
@@ -78,31 +87,32 @@ struct DrawerView: View {
         }
     }
 
-    @ViewBuilder
-    private func terminalControls(_ session: ConnectionSession) -> some View {
+    private func terminalControls(_ session: ConnectionSession, iconOnly: Bool) -> some View {
         let controller = session.terminal()
-        Button {
-            if let path = session.server?.currentPath { controller.changeDirectory(to: path) }
-        } label: {
-            Label("cd to current folder", systemImage: "folder")
-        }
-        .controlSize(.small)
-        .help("Type cd into the shell for the active server folder")
-        Menu {
-            ForEach(controller.snippets) { snippet in
-                Button(snippet.name) {
-                    controller.type(snippet.command, run: NSEvent.modifierFlags.contains(.option))
-                }
+        return HStack(spacing: 8) {
+            Spacer(minLength: 0)
+            Button {
+                if let path = session.server?.currentPath { controller.changeDirectory(to: path) }
+            } label: {
+                Label("cd to current folder", systemImage: "folder")
             }
-            if !controller.snippets.isEmpty { Divider() }
-            Button("Manage Snippets\u{2026}") { showSnippets = true }
-        } label: {
-            Label("Snippets", systemImage: "text.badge.star")
+            .help("Type cd into the shell for the active server folder")
+            Menu {
+                ForEach(controller.snippets) { snippet in
+                    Button(snippet.name) {
+                        controller.type(snippet.command, run: NSEvent.modifierFlags.contains(.option))
+                    }
+                }
+                if !controller.snippets.isEmpty { Divider() }
+                Button("Manage Snippets\u{2026}") { showSnippets = true }
+            } label: {
+                Label("Snippets", systemImage: "text.badge.star")
+            }
+            .menuStyle(.button)
+            .fixedSize()
+            .help("Click a snippet to type it, hold Option to run it")
         }
-        .menuStyle(.button)
-        .controlSize(.small)
-        .fixedSize()
-        .help("Click a snippet to type it, hold Option to run it")
+        .labelStyle(AdaptiveLabelStyle(iconOnly: iconOnly))
     }
 
     private var handle: some View {
@@ -140,6 +150,19 @@ struct DrawerView: View {
     private func copy() {
         guard let session = app.activeSession else { return }
         Dialogs.copyToPasteboard(session.log.copyText(errorsOnly: errorsOnly))
+    }
+}
+
+/// Title and icon, or just the icon (with its tooltip) when the drawer header is tight.
+struct AdaptiveLabelStyle: LabelStyle {
+    let iconOnly: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        if iconOnly {
+            configuration.icon
+        } else {
+            Label(configuration)
+        }
     }
 }
 
