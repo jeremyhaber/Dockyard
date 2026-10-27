@@ -39,3 +39,26 @@ jobs:
       - name: RcloneKit tests with the real library
         working-directory: Packages/RcloneKit
         run: DOCKYARD_LIBRCLONE="$GITHUB_WORKSPACE/build/librclone/librclone.dylib" swift test
+
+  app-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate project
+        working-directory: App
+        run: xcodegen
+      - name: Build app
+        working-directory: App
+        run: |
+          set -o pipefail
+          xcodebuild -scheme Dockyard -configuration Debug -destination 'platform=macOS' \
+            CODE_SIGNING_ALLOWED=NO build 2>&1 | tee "$RUNNER_TEMP/xcodebuild.log" | tail -n 300
+      - name: Compiler diagnostics
+        if: failure()
+        run: grep -E "error:|warning:" "$RUNNER_TEMP/xcodebuild.log" | sort -u | head -100
