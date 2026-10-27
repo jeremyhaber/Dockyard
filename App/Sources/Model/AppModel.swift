@@ -117,9 +117,12 @@ final class AppModel {
         // starts restored jobs paused until `offerToResumeTransfers` has asked.
         let siteHost = QueueSiteHost()
         self.queueSiteHost = siteHost
-        let siteProvider: (@Sendable (UUID) async -> TransferSite?)? = demo ? nil : { id in
-            guard let connection = try? await repo.connection(id: id) else { return nil }
-            return await siteHost.model?.transferSite(for: connection)
+        var siteProvider: (@Sendable (UUID) async -> TransferSite?)?
+        if !demo {
+            siteProvider = { @Sendable id in
+                guard let connection = try? await repo.connection(id: id) else { return nil }
+                return await siteHost.site(for: connection)
+            }
         }
         self.queue = TransferQueue(
             maxConcurrent: demo ? 1 : 10, conflictPolicy: .ask, resolver: { info in await prompts.askConflict(info) },
@@ -140,6 +143,10 @@ final class AppModel {
 
     private final class QueueSiteHost: @unchecked Sendable {
         @MainActor weak var model: AppModel?
+
+        @MainActor func site(for connection: Connection) -> TransferSite? {
+            model?.transferSite(for: connection)
+        }
     }
 
     // MARK: Transfer queue sites
