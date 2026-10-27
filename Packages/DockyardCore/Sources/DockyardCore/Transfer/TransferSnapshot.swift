@@ -26,6 +26,10 @@ public struct TransferSnapshot: Sendable, Equatable {
     public var failedCount: Int
     public var skippedCount: Int
     public var cancelledCount: Int
+    /// Children of folder transfers left out by the site's transfer filters since the queue was last cleared.
+    public var filteredCount = 0
+    /// Existing files left alone, by reason, since the queue was last cleared.
+    public var skipReasons: [SkipReason: Int] = [:]
     public var bytesDone: UInt64
     public var bytesTotal: UInt64
     /// Bytes per second, smoothed over the last publishes.

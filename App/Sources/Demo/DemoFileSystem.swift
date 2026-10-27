@@ -14,13 +14,16 @@ final class DemoFileSystem: RemoteFileSystem {
     private let flavor: Flavor
     private let shell: Bool
     let browsesAsRoot: Bool
+    /// Downloads of these paths fail with "<code> <message>" instead of running (the Failed list in the demo).
+    private let failures: [String: String]
     private let hub = LogHub()
     private let state: LockedBox<State>
 
     var logStream: AsyncStream<LogLine> { hub.stream() }
     var supportsShell: Bool { shell }
 
-    init(kind: Kind, flavor: Flavor = .acme, shell: Bool = false, browsesAsRoot: Bool = false) {
+    init(kind: Kind, flavor: Flavor = .acme, shell: Bool = false, browsesAsRoot: Bool = false, failures: [String: String] = [:]) {
+        self.failures = failures
         self.kind = kind
         self.flavor = flavor
         self.shell = shell
@@ -88,6 +91,9 @@ final class DemoFileSystem: RemoteFileSystem {
     }
 
     func download(_ remote: String, to local: URL, progress: Progress, resume: Bool) async throws {
+        if let message = failures[remote] {
+            throw RemoteError.serverRejected(code: Int(message.prefix(3)) ?? 550, message: String(message.dropFirst(4)))
+        }
         let total = progress.totalUnitCount > 0 ? progress.totalUnitCount : 480_000_000
         progress.totalUnitCount = total
         // Jump to a fixed point and hold so screenshots always show the same state.
@@ -201,7 +207,43 @@ final class DemoFileSystem: RemoteFileSystem {
         t["\(home)/mail"] = []
         t["\(home)/ssl"] = [file("\(home)/ssl", "acmecorp.example.crt", size: 3_412, ageDays: 60, perms: 0o600)]
         t["\(home)/tmp"] = []
+        if DemoMode.screen == "versions" { addTrash(to: &t, home: home) }
         return t
+    }
+
+    /// Kept versions and a trashed folder under ~/.dockyard-trash, for the Versions screenshot.
+    private static func addTrash(to t: inout [String: [RemoteItem]], home: String) {
+        let root = "\(home)/.dockyard-trash"
+        func put(_ path: String, size: UInt64? = nil, ageDays: Double) {
+            var parent = RemotePath.parent(of: path)
+            var child = path
+            var isDirectory = size == nil
+            var childSize = size
+            while true {
+                let name = RemotePath.lastComponent(of: child)
+                let item = isDirectory
+                    ? dir(parent, name, ageDays: ageDays)
+                    : file(parent, name, size: childSize ?? 0, ageDays: ageDays)
+                if !t[parent, default: []].contains(where: { $0.path == item.path }) { t[parent, default: []].append(item) }
+                if parent == home || parent == "/" { break }
+                child = parent
+                parent = RemotePath.parent(of: parent)
+                isDirectory = true
+                childSize = nil
+            }
+        }
+        let www = "\(home)/public_html"
+        let day1 = "\(root)/2026-10-25\(www)"
+        put("\(day1)/index.php", size: 4_212, ageDays: 2)
+        put("\(day1)/wp-config.php", size: 3_412, ageDays: 14)
+        put("\(day1)/wp-content/themes/acme-child/functions.php", size: 18_330, ageDays: 20)
+        let day2 = "\(root)/2026-10-24\(www)"
+        put("\(day2)/style.css", size: 2_104, ageDays: 3)
+        put("\(day2)/style.css.~2~", size: 2_388, ageDays: 1)
+        put("\(day2)/images.~dir~", size: 0, ageDays: 0)
+        put("\(day2)/images/hero-banner.jpg", size: 1_204_881, ageDays: 5)
+        put("\(day2)/images/logo.svg", size: 6_120, ageDays: 80)
+        put("\(root)/2026-10-22\(www)/.htaccess", size: 1_024, ageDays: 14)
     }
 
     private static func bluebirdTree() -> [String: [RemoteItem]] {

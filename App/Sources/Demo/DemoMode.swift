@@ -6,7 +6,7 @@ enum DemoMode {
         UserDefaults.standard.bool(forKey: "DockyardDemo") || ProcessInfo.processInfo.environment["DOCKYARD_DEMO"] == "1"
     }()
 
-    /// `-DockyardDemoScreen main|connectionManager|siteEditor|logDrawer|jump|terminal|sideBySide|compare|editing|settings`
+    /// `-DockyardDemoScreen main|connectionManager|siteEditor|logDrawer|jump|terminal|sideBySide|compare|editing|settings|transfers|transfersFailed|versions|search|watchFolders|siteEditorSafety|launchPrompt|conflict`
     static let screen: String = UserDefaults.standard.string(forKey: "DockyardDemoScreen") ?? "main"
 
     /// `-DockyardAppearance dark|light` forces the app's appearance (the system setting is ignored in CI).
@@ -31,6 +31,7 @@ enum DemoMode {
         switch screen {
         case "connectionManager", "healthCheck", "recentlyRemoved": "manager"
         case "settings": "settings"
+        case "watchFolders": "watch"
         case "quickLook": "quickLook"
         default: "main"
         }

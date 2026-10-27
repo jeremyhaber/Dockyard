@@ -100,5 +100,5 @@ jobs:
       - name: Build log tail
         if: failure()
         run: |
-          tail -n 60 "$RUNNER_TEMP/xcodebuild.log" | cut -c1-400 | while IFS= read -r line; do echo "::notice::$line"; done
+          grep -inE "error|fail|fatal|crash|stack dump|BUILD" "$RUNNER_TEMP/xcodebuild.log" | grep -v "^[0-9]*:Compile\|Node.js" | tail -n 40 | cut -c1-400 | while IFS= read -r line; do echo "::warning::$line"; done
           true

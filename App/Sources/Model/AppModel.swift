@@ -6,7 +6,7 @@ import Observation
 import RcloneKit
 
 enum DrawerTab: String, Hashable {
-    case log, terminal
+    case log, terminal, transfers
 }
 
 /// The Quick Connect bar's protocol menu.
@@ -73,6 +73,9 @@ final class AppModel {
     let prompts: PromptCenter
     let edits = EditCenter()
     let archives = ArchiveCenter()
+    let transferUI = TransferCenter()
+    let safety = SafetyCenter()
+    let watches = WatchCenter()
     let mounts = MountService()
     private(set) var startupError: String?
 
@@ -170,7 +173,7 @@ final class AppModel {
             }
         }
         self.queue = TransferQueue(
-            maxConcurrent: demo ? 1 : AppSettings.maxConnections, conflictPolicy: .ask, resolver: { info in await prompts.askConflict(info) },
+            maxConcurrent: demo ? 1 : AppSettings.maxConnections, conflictPolicy: AppSettings.conflictPolicy, resolver: { info in await prompts.askConflict(info) },
             database: db, siteProvider: siteProvider)
         self.startupError = startup
         siteHost.model = self
@@ -184,6 +187,7 @@ final class AppModel {
             installSecretCacheFlush()
             migrateSecretsIfNeeded()
             startFinderLogRelay()
+            watches.start()
             Task { await offerToResumeTransfers() }
         }
     }
@@ -204,44 +208,41 @@ final class AppModel {
     /// What the queue needs to open extra pooled connections to `connection` (limits, back-off and
     /// persistence across restarts all hang off this registration).
     func transferSite(for connection: Connection) -> TransferSite {
-        TransferSite(connection: connection) { [weak self] in
+        TransferSite(
+            connection: connection,
+            filter: TransferFilter(patterns: AppSettings.globalFilterPatterns + connection.transferFilters),
+            verifyChecksums: connection.verifyChecksums && connection.protocol == .sftp,
+            beforeOverwrite: overwriteHook(for: connection)
+        ) { [weak self] in
             guard let self else { throw AppError.cancelled }
             return try await self.makeQueueSession(for: connection)
         }
     }
 
-    private func makeQueueSession(for connection: Connection) throws -> any RemoteFileSystem {
+    func makeQueueSession(for connection: Connection) throws -> any RemoteFileSystem {
         let log = session(for: connection.id)?.log ?? LogBuffer()
         let validator = hostKeyValidator(host: connection.host, port: connection.port, log: log)
         return try FileSystemFactory.make(
             for: connection, secrets: secrets, hostKeyValidator: validator, jumpHops: try jumpHops(for: connection, log: log))
     }
 
-    private func registerTransferSite(_ connection: Connection) {
+    func registerTransferSite(_ connection: Connection) {
         let site = transferSite(for: connection)
         let queue = queue
         Task { await queue.register(site: site) }
     }
 
-    /// Restored unfinished jobs start paused; ask before they hit the network.
+    /// Queued items from the last session start paused and failed ones stay listed; ask what to do with them once.
     private func offerToResumeTransfers() async {
-        let count = await queue.restoredJobCount
-        guard count > 0 else { return }
-        let alert = NSAlert()
-        alert.messageText = "Resume \(count) unfinished transfer\(count == 1 ? "" : "s")?"
-        alert.informativeText = "Dockyard was closed while transfers were still queued. They are paused until you resume them."
-        alert.addButton(withTitle: "Resume")
-        alert.addButton(withTitle: "Keep Paused")
-        alert.addButton(withTitle: "Discard")
-        switch alert.runModal() {
-        case .alertFirstButtonReturn:
-            await queue.resume()
-        case .alertThirdButtonReturn:
-            await queue.cancelAll()
-            await queue.removeFinished()
-        default:
-            break
+        let queued = await queue.restoredQueuedCount, failed = await queue.restoredFailedCount
+        guard queued + failed > 0 else { return }
+        var choice = AppSettings.leftoverChoice
+        if choice == .ask {
+            let answer = await prompts.askLeftovers(queued: queued, failed: failed)
+            choice = answer.choice
+            if answer.remember { UserDefaults.standard.set(choice.rawValue, forKey: AppSettings.launchLeftovers) }
         }
+        await applyLeftoverChoice(choice)
     }
 
     // MARK: Derived
@@ -313,6 +314,7 @@ final class AppModel {
 
     private func handle(_ snapshot: TransferSnapshot) {
         transfers = snapshot
+        trackTransferFailures(snapshot)
         Notifier.shared.observe(snapshot)
         journalCompletedTransfers(snapshot)
         let idle = snapshot.isIdle
@@ -422,6 +424,7 @@ final class AppModel {
             await edits.stopAll(connectionID: session.connection.id)
             await session.teardown()
             columnIDs.removeAll { $0 == session.id }
+            safety.forget(session)
             sessions.removeAll { $0.id == session.id }
             if !sessions.contains(where: { $0.connection.id == session.connection.id }) {
                 connections.openConnections.close(session.connection.id)
@@ -541,6 +544,7 @@ final class AppModel {
         server.start(expanded: serverExpanded)
         local.start(expanded: localExpanded)
         server.onVisit?(server.currentPath)
+        purgeKeptVersions(session)
         Task { await reloadQuickHistory() }
     }
 

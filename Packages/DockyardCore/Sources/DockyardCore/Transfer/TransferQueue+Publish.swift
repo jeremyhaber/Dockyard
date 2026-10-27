@@ -53,6 +53,8 @@ extension TransferQueue {
         s.failedCount = stats.failed
         s.skippedCount = stats.skipped
         s.cancelledCount = stats.cancelled
+        s.filteredCount = filteredCount
+        s.skipReasons = skipReasons
         s.bytesDone = stats.bytesFinished + inFlight
         s.bytesTotal = max(stats.bytesTotal, s.bytesDone)
         s.rate = sampleRate(bytes: s.bytesDone, running: !activeJobs.isEmpty)

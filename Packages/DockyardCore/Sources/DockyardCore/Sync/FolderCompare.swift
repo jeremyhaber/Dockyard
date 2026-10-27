@@ -21,8 +21,13 @@ public struct DiffEntry: Sendable, Equatable, Identifiable {
 public struct FolderComparator: Sendable {
     /// Times closer than this are equal. FTP servers report minute resolution, so callers may raise it.
     public var timeTolerance: TimeInterval
+    /// Entries matching these rules appear on neither side, so sync never touches them.
+    public var filter: TransferFilter
 
-    public init(timeTolerance: TimeInterval = 2) { self.timeTolerance = timeTolerance }
+    public init(timeTolerance: TimeInterval = 2, filter: TransferFilter = .none) {
+        self.timeTolerance = timeTolerance
+        self.filter = filter
+    }
 
     /// Compares two folders by size and modification time. Folders are only descended into when `recursive`.
     public func compare(
@@ -58,6 +63,7 @@ public struct FolderComparator: Sendable {
         for name in Set(lmap.keys).union(rmap.keys) {
             let rel = prefix.isEmpty ? name : prefix + "/" + name
             let li = lmap[name], ri = rmap[name]
+            if filter.matches(path: rel, isDirectory: (li ?? ri)?.isDirectory ?? false) { continue }
             switch (li, ri) {
             case let (li?, ri?):
                 let status = classify(left: li, right: ri)
@@ -80,6 +86,7 @@ public struct FolderComparator: Sendable {
     private func collect(_ ep: TransferEndpoint, _ dir: RemoteItem, _ rel: String, onLeft: Bool, into out: inout [DiffEntry]) async throws {
         for item in try await ep.fs.list(dir.path) {
             let r = rel + "/" + item.name
+            if filter.matches(path: r, isDirectory: item.isDirectory) { continue }
             out.append(DiffEntry(relativePath: r, isDirectory: item.isDirectory, status: onLeft ? .onlyLeft : .onlyRight,
                                  left: onLeft ? item : nil, right: onLeft ? nil : item))
             if item.isDirectory, !item.isSymlink { try await collect(ep, item, r, onLeft: onLeft, into: &out) }

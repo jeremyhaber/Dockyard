@@ -16,6 +16,7 @@ struct SettingsView: View {
                 }
             }
             OnePasswordSettingsSection()
+            TransferSettingsSections()
             MacSettingsSections()
             Section("Logging") {
                 Toggle("Write a log file for each connection", isOn: $writeLogFiles)

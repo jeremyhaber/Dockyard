@@ -112,6 +112,9 @@ public struct EditSession: Sendable, Identifiable, Equatable {
 
 /// Download to a temp folder, hand the file to the user's editor, watch it and upload on every save.
 public actor EditInPlaceCoordinator {
+    /// Called before the first upload of an edit session replaces the server file (the safety net keeps that version).
+    public typealias BeforeOverwrite = @Sendable (_ path: String, _ fs: any RemoteFileSystem) async throws -> Void
+
     private final class Live {
         let session: EditSession
         let fs: any RemoteFileSystem
@@ -121,7 +124,11 @@ public actor EditInPlaceCoordinator {
         var uploading = false
         var dirty = false
         var unsynced = false
-        init(session: EditSession, fs: any RemoteFileSystem) { self.session = session; self.fs = fs }
+        var versionKept = false
+        let beforeOverwrite: BeforeOverwrite?
+        init(session: EditSession, fs: any RemoteFileSystem, beforeOverwrite: BeforeOverwrite?) {
+            self.session = session; self.fs = fs; self.beforeOverwrite = beforeOverwrite
+        }
     }
 
     private let watcher: any FileChangeWatcher
@@ -148,7 +155,9 @@ public actor EditInPlaceCoordinator {
     }
 
     /// Downloads the file and starts watching it. Opening the same file again returns the running session.
-    public func open(fs: any RemoteFileSystem, remotePath: String, connectionId: UUID, connectionName: String) async throws -> EditSession {
+    public func open(
+        fs: any RemoteFileSystem, remotePath: String, connectionId: UUID, connectionName: String, beforeOverwrite: BeforeOverwrite? = nil
+    ) async throws -> EditSession {
         if let existing = live.values.first(where: { $0.session.connectionId == connectionId && $0.session.remotePath == remotePath }) {
             return existing.session
         }
@@ -163,7 +172,7 @@ public actor EditInPlaceCoordinator {
             throw error
         }
         let session = EditSession(id: id, connectionId: connectionId, connectionName: connectionName, remotePath: remotePath, localURL: local)
-        let entry = Live(session: session, fs: fs)
+        let entry = Live(session: session, fs: fs, beforeOverwrite: beforeOverwrite)
         if let item = try? await fs.lookup(remotePath) { entry.baseModified = item.modified; entry.baseSize = item.size }
         live[id] = entry
         // Local copy keeps the server's modification time so "newer" comparisons stay meaningful.
@@ -228,6 +237,10 @@ public actor EditInPlaceCoordinator {
         }
         let bytes = LocalFileSize.size(of: s.localURL) ?? 0
         do {
+            if !entry.versionKept, let keep = entry.beforeOverwrite {
+                try await keep(s.remotePath, entry.fs)
+                entry.versionKept = true
+            }
             try await Self.upload(entry.fs, s.localURL, to: s.remotePath)
             if let item = try? await entry.fs.lookup(s.remotePath) { entry.baseModified = item.modified; entry.baseSize = item.size }
             entry.unsynced = entry.dirty  // a newer save may already be waiting

@@ -23,30 +23,34 @@ struct SiteEditorSheet: View {
     var body: some View {
         VStack(spacing: 0) {
             ScrollViewReader { proxy in
-                Form {
-                    generalSection
-                    if draft.protocolChoice == .cloud {
-                        cloudSection
-                    } else if draft.protocolChoice == .sftp {
-                        JumpHostSection(draft: $draft)
-                        authSection.id("authentication")
-                        elevationSection
-                    } else {
-                        Section("Authentication") {
-                            SecretSourceField(
-                                draft: $draft, purpose: .password, title: "Password",
-                                keychainPrompt: hasStoredPassword ? "Saved in Keychain" : "Optional, asked on connect")
-                        }
+            Form {
+                generalSection
+                if draft.protocolChoice == .cloud {
+                    cloudSection
+                } else if draft.protocolChoice == .sftp {
+                    JumpHostSection(draft: $draft)
+                    authSection.id("authentication")
+                    elevationSection
+                } else {
+                    Section("Authentication") {
+                        SecretSourceField(
+                            draft: $draft, purpose: .password, title: "Password",
+                            keychainPrompt: hasStoredPassword ? "Saved in Keychain" : "Optional, asked on connect")
                     }
-                    finderSection
-                    otherSection
                 }
-                .formStyle(.grouped)
-                .task {
-                    guard DemoMode.isEnabled, DemoMode.screen == "siteEditor1Password" else { return }
-                    try? await Task.sleep(nanoseconds: 600_000_000)
-                    proxy.scrollTo("authentication", anchor: .top)
-                }
+                finderSection
+                SiteEditorSafetySection(draft: $draft)
+                otherSection
+            }
+            .formStyle(.grouped)
+            .onAppear {
+                if DemoMode.screen == "siteEditorSafety" { proxy.scrollTo(SiteEditorSafetySection.anchor, anchor: .top) }
+            }
+            .task {
+                guard DemoMode.isEnabled, DemoMode.screen == "siteEditor1Password" else { return }
+                try? await Task.sleep(nanoseconds: 600_000_000)
+                proxy.scrollTo("authentication", anchor: .top)
+            }
             }
             Divider()
             buttons

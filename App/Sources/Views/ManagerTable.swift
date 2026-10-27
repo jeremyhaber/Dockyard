@@ -349,6 +349,7 @@ final class ManagerTableCoordinator: NSObject, NSTableViewDataSource, NSTableVie
         add("Toggle Favorite", #selector(menuFavorite))
         let mounted = selectedConnections().first?.mountInFinder ?? false
         add(mounted ? "Unmount from Finder" : "Mount in Finder", #selector(menuMount))
+        if let first = selectedConnections().first, AppModel.shared.canOpenCPanel(first) { add("Open cPanel", #selector(menuCPanel)) }
         menu.addItem(.separator())
         add("Test", #selector(menuTest))
         add("Remove\u{2026}", #selector(menuRemove))
@@ -360,6 +361,7 @@ final class ManagerTableCoordinator: NSObject, NSTableViewDataSource, NSTableVie
     @objc private func menuMount() {
         for c in selectedConnections() { parent?.actions.setMounted(c, !c.mountInFinder) }
     }
+    @objc private func menuCPanel() { if let c = selectedConnections().first { AppModel.shared.openCPanel(for: c) } }
     @objc private func menuEdit() { if let c = selectedConnections().first { parent?.actions.edit(c) } }
     @objc private func menuDuplicate() { if let c = selectedConnections().first { parent?.actions.duplicate(c) } }
     @objc private func menuFavorite() { for c in selectedConnections() { parent?.actions.toggleFavorite(c) } }

@@ -32,7 +32,8 @@ extension AppModel {
     /// Server-to-server, upload and download copies all go through here so the queue and the journal see them.
     func transfer(
         _ items: [RemoteItem], from source: ConnectionSession, _ sourceSide: PaneSide,
-        to destination: ConnectionSession, _ destinationSide: PaneSide, directory: String, move: Bool
+        to destination: ConnectionSession, _ destinationSide: PaneSide, directory: String, move: Bool,
+        conflict: ConflictPolicy? = nil
     ) {
         guard !items.isEmpty else { return }
         let from = source.endpoint(sourceSide), to = destination.endpoint(destinationSide)
@@ -46,7 +47,7 @@ extension AppModel {
                 let clashes = items.filter { existing.contains($0.name) }.map { RemotePath.join(directory, $0.name) }
                 if !clashes.isEmpty, !(await destination.authorize(.overwrite, paths: clashes)) { return }
             }
-            let ids = await queue.enqueue(items: items, from: from, to: to, into: directory, move: move)
+            let ids = await queue.enqueue(items: items, from: from, to: to, into: directory, move: move, conflict: conflict)
             for (id, item) in zip(ids, items) where !item.isDirectory && !existing.contains(item.name) {
                 pendingJournal[id] = PendingChange(
                     scope: scope, sessionID: destinationID, side: destinationSide,

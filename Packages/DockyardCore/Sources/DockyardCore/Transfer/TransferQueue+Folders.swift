@@ -19,6 +19,7 @@ extension TransferQueue {
         var items = try await route.src.list(rec.sourcePath)
         try Task.checkCancellation()
         items.removeAll { $0.isDirectory && $0.isSymlink }  // never follow folder symlinks
+        applyFilter(to: &items, in: rec)
         var known = Set<String>()
         if rec.resume {
             known = knownChildren(of: rec.id)
@@ -39,6 +40,31 @@ extension TransferQueue {
             await Task.yield()
         }
         return .waitingForChildren
+    }
+
+    /// Drops children that the remote site's transfer filter skips and counts them for the queue UI.
+    private func applyFilter(to items: inout [RemoteItem], in folder: JobRecord) {
+        let profile = [folder.dstSite, folder.srcSite].compactMap { $0.flatMap { sites[$0]?.profile } }.first { !$0.filter.isEmpty }
+        guard let filter = profile?.filter else { return }
+        let root = rootSourcePath(of: folder)
+        let prefix = folder.sourcePath.count > root.count
+            ? String(folder.sourcePath.dropFirst(root.count)).trimmingCharacters(in: CharacterSet(charactersIn: "/")) : ""
+        let result = filter.apply(items, path: { prefix.isEmpty ? $0.name : prefix + "/" + $0.name }, isDirectory: { $0.isDirectory })
+        guard !result.skipped.isEmpty else { return }
+        items = result.kept
+        filteredCount += result.skipped.count
+        let n = result.skipped.count
+        log.emit(.status, "Skipped \(n) item\(n == 1 ? "" : "s") in \(folder.name) by transfer filters")
+    }
+
+    private func rootSourcePath(of folder: JobRecord) -> String {
+        if folder.parentId == nil { rootPaths[folder.id] = folder.sourcePath; return folder.sourcePath }
+        if let path = rootPaths[folder.rootId] { return path }
+        let path = (try? writer.read { db in
+            try String.fetchOne(db, sql: "SELECT sourcePath FROM transferJob WHERE id = ?", arguments: [folder.rootId])
+        }) ?? folder.sourcePath
+        rootPaths[folder.rootId] = path
+        return path
     }
 
     private func insertChildren(of parent: JobRecord, _ items: ArraySlice<RemoteItem>) {

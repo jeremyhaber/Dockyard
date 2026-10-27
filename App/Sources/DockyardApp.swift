@@ -14,6 +14,12 @@ struct DockyardApp: App {
         .defaultSize(DockyardWindowDefaults.initialSize)
         .commands { AppCommands(model: model) }
 
+        Window("Watch Folders", id: "watch") {
+            WatchFoldersView()
+                .environment(model)
+        }
+        .defaultSize(width: 760, height: 460)
+
         Window("Connections", id: "manager") {
             ConnectionManagerView()
                 .environment(model)
@@ -123,6 +129,11 @@ struct AppCommands: Commands {
             Divider()
             Button("Jump to Site or Folder\u{2026}") { model.jumpVisible = true }
                 .keyboardShortcut("k")
+            Button("Find in Server Folder\u{2026}") { model.openSearch() }
+                .keyboardShortcut("f")
+                .disabled(model.activeSession?.server == nil)
+            Button("Versions of Deleted and Replaced Files\u{2026}") { if let s = model.activeSession { model.showVersions(for: s) } }
+                .disabled(model.activeSession?.status.isConnected != true)
         }
 
         CommandGroup(after: .toolbar) {
@@ -185,6 +196,7 @@ struct AppCommands: Commands {
         CommandGroup(before: .windowList) {
             Button("Dockyard") { openWindow(id: "main") }
             Button("Connections") { openWindow(id: "manager") }
+            Button("Watch Folders") { openWindow(id: "watch") }
             Divider()
             Button("Next Connection Tab") { cycle(1) }
                 .keyboardShortcut("]", modifiers: [.command, .shift])

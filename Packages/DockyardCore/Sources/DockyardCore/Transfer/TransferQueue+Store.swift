@@ -149,7 +149,7 @@ extension TransferQueue {
             out.trackers = try buildTrackers(db)
             let keys = try Row.fetchAll(db, sql: """
                 SELECT DISTINCT siteKey, CASE WHEN srcSite IS NULL THEN dstLabel ELSE srcLabel END AS label
-                FROM transferJob WHERE state = 0 AND siteKey != ?
+                FROM transferJob WHERE state IN (0, 3, 4) AND siteKey != ?
                 """, arguments: [JobRecord.localKey])
             var seen = Set<String>()
             for row in keys {

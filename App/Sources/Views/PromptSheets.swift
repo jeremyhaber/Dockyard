@@ -7,6 +7,7 @@ struct PromptSheet: View {
 
     var body: some View {
         switch prompt {
+        case .leftovers(let request): LeftoverSheet(request: request)
         case .conflict(let request): ConflictSheet(request: request)
         case .password(let request): PasswordSheet(request: request)
         case .hostKey(let request): HostKeySheet(request: request)
@@ -57,62 +58,6 @@ struct ConfirmSheet: View {
         .padding(20)
         .frame(width: 460)
         .interactiveDismissDisabled()
-    }
-}
-
-struct ConflictSheet: View {
-    @Environment(AppModel.self) private var app
-    let request: ConflictRequest
-    @State private var applyToAll = false
-
-    var body: some View {
-        let info = request.info
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 10) {
-                Image(systemName: "doc.on.doc")
-                    .font(.system(size: 26))
-                    .foregroundStyle(Color.accentColor)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("\"\(info.name)\" already exists").font(.headline)
-                    Text(info.route).font(.caption).foregroundStyle(Palette.textSecondary)
-                }
-            }
-            Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 4) {
-                GridRow {
-                    Text("").gridColumnAlignment(.leading)
-                    Text("Size").foregroundStyle(Palette.textSecondary)
-                    Text("Modified").foregroundStyle(Palette.textSecondary)
-                }
-                GridRow {
-                    Text("Incoming")
-                    Text(FileDisplay.size(info.sourceSize))
-                    Text(FileDisplay.modified(info.sourceModified))
-                }
-                GridRow {
-                    Text("Existing")
-                    Text(FileDisplay.size(info.destinationSize))
-                    Text(FileDisplay.modified(info.destinationModified))
-                }
-            }
-            .font(.system(size: 12, design: .monospaced))
-            Toggle("Apply to all remaining conflicts", isOn: $applyToAll)
-            HStack {
-                Button("Cancel Transfer") { resolve(.cancel) }
-                Spacer()
-                Button("Skip") { resolve(.skip) }
-                Button("Rename") { resolve(.rename) }
-                Button("Overwrite if Newer") { resolve(.overwriteIfNewer) }
-                Button("Overwrite") { resolve(.overwrite) }
-                    .keyboardShortcut(.defaultAction)
-            }
-        }
-        .padding(20)
-        .frame(width: 560)
-        .interactiveDismissDisabled()
-    }
-
-    private func resolve(_ action: ConflictAction) {
-        app.prompts.resolveConflict(request.id, ConflictDecision(action, applyToAll: applyToAll))
     }
 }
 

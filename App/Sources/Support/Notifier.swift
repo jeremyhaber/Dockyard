@@ -9,13 +9,8 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     static let shared = Notifier()
     nonisolated private static let failedCategory = "transfersFailed"
 
-    /// Called when the user clicks a "transfers failed" notification. `AppModel.showFailedTransfers()` replaces
-    /// the default once the Transfers tab is merged.
-    var onShowFailedTransfers: @MainActor () -> Void = {
-        let app = AppModel.shared
-        app.drawerTab = .log
-        app.drawerVisible = true
-    }
+    /// Called when the user clicks a "transfers failed" notification: the Transfers tab, Failed list.
+    var onShowFailedTransfers: @MainActor () -> Void = { AppModel.shared.showFailedTransfers() }
 
     private var wasIdle = true
     private var baseline = (completed: 0, failed: 0)

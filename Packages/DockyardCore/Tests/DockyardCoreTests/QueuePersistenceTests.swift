@@ -50,6 +50,66 @@ private func makeQueue(_ env: TransferEnv, database: DockyardDatabase? = nil, pr
         await q2.shutdown()
     }
 
+    @Test func failedItemsSurviveARestartUntilRetriedOrCleared() async throws {
+        let env = try TransferEnv()
+        let path = env.path("queue.sqlite")
+        try env.write("good.txt", "g"); try env.write("bad.txt", "b")
+        let first = FakeServer()
+        first.files.makeDir("/d")
+        first.files.failNext("/d/bad.txt", times: 9, error: RemoteError.protocolError("550 Permission denied"))
+        let site = first.site(label: "PROD", max: 2)
+        let q1 = makeQueue(env, database: try DockyardDatabase(path: path))
+        await q1.register(site: site)
+        await q1.enqueue([upload(env, "good.txt", to: first.endpoint(site), "/d/good.txt"),
+                          upload(env, "bad.txt", to: first.endpoint(site), "/d/bad.txt")])
+        await q1.waitUntilIdle()
+        await q1.flush()
+        await q1.shutdown()
+
+        let second = FakeServer()
+        second.files.makeDir("/d")
+        let site2 = second.site(site.id, label: "PROD", max: 2)
+        let q2 = makeQueue(env, database: try DockyardDatabase(path: path)) { id in id == site.id ? site2 : nil }
+        #expect(await q2.restoredFailedCount == 1)
+        #expect(await q2.restoredQueuedCount == 0)
+        #expect(await q2.restoredJobCount == 0)
+        var snap = await q2.snapshot()
+        #expect(snap.failedCount == 1 && !snap.isPaused)
+        let failed = await q2.page(offset: 0, limit: 10, filter: TransferJobFilter(scope: .files, states: [.failed]))
+        #expect(failed.count == 1 && failed[0].error?.contains("550 Permission denied") == true)
+
+        await q2.retryFailed()
+        await q2.waitUntilIdle()
+        #expect(second.files.text("/d/bad.txt") == "b")
+        snap = await q2.snapshot()
+        #expect(snap.failedCount == 0)
+        await q2.shutdown()
+    }
+
+    @Test func leftoverCountsCoverQueuedAndFailed() async throws {
+        let env = try TransferEnv()
+        let path = env.path("queue.sqlite")
+        let first = FakeServer()
+        first.files.makeDir("/d")
+        first.files.setHook { _ in try await Task.sleep(nanoseconds: 60_000_000_000) }
+        let site = first.site(label: "PROD", max: 1)
+        let q1 = makeQueue(env, database: try DockyardDatabase(path: path))
+        await q1.register(site: site)
+        var requests: [TransferRequest] = []
+        for i in 0..<4 {
+            try env.write("f\(i).txt", "x")
+            requests.append(upload(env, "f\(i).txt", to: first.endpoint(site), "/d/f\(i).txt"))
+        }
+        await q1.enqueue(requests)
+        #expect(await waitUntil { await q1.snapshot().activeCount == 1 })
+        await q1.flush()
+        let q2 = makeQueue(env, database: try DockyardDatabase(path: path))
+        #expect(await q2.restoredQueuedCount == 4)
+        #expect(await q2.restoredFailedCount == 0)
+        await q1.shutdown()
+        await q2.shutdown()
+    }
+
     @Test func foldersResumeWhereTheyStopped() async throws {
         let env = try TransferEnv()
         let path = env.path("queue.sqlite")

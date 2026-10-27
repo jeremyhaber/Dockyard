@@ -166,12 +166,9 @@ public final class ArchiveService: Sendable {
         existing: RemoteItem, source: RemoteItem?, name: String, path: String, fs: any RemoteFileSystem
     ) async throws -> Resolution {
         var action: ConflictAction
-        switch policy {
-        case .overwrite: action = .overwrite
-        case .overwriteIfNewer: action = .overwriteIfNewer
-        case .skip: action = .skip
-        case .rename: action = .rename
-        case .ask:
+        switch policy.action {
+        case .some(let chosen): action = chosen
+        case .none:
             guard let resolver else { return .skip }  // never overwrite without being told to
             let info = ConflictInfo(
                 jobId: UUID(), name: name, route: "archive", sourcePath: source?.path ?? "", destinationPath: path,
@@ -182,10 +179,11 @@ public final class ArchiveService: Sendable {
         switch action {
         case .cancel: throw CancellationError()
         case .skip: return .skip
-        case .overwrite: return .overwrite
-        case .overwriteIfNewer:
-            guard let new = source?.modified, let old = existing.modified else { return .overwrite }
-            return new.timeIntervalSince(old) > 1 ? .overwrite : .skip
+        case .overwrite, .resume: return .overwrite
+        case .overwriteIfNewer, .overwriteIfDifferent, .overwriteIfSizeDiffers:
+            return action.replaces(
+                sourceSize: source?.size, sourceModified: source?.modified,
+                destinationSize: existing.size, destinationModified: existing.modified) ? .overwrite : .skip
         case .rename:
             let dir = RemotePath.parent(of: path)
             var n = 1

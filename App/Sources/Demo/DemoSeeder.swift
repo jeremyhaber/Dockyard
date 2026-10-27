@@ -35,12 +35,18 @@ enum DemoSeeder {
             username: "acme", isProd: true, favorite: true, tags: ["wordpress", "prod"], notes: "Main marketing site.",
             mountInFinder: true, mountOnLaunch: true,
             lastConnectedAt: ago(0.5 * hour), createdAt: ago(200 * day), initialRemotePath: "/home/acme/public_html",
-            localFolder: "/Users/demo/Sites/acme"))
+            localFolder: "/Users/demo/Sites/acme", keepVersionsOnOverwrite: true,
+            pinnedFolders: [
+                PinnedFolder(path: "/home/acme/public_html/wp-content/themes", label: "Themes"),
+                PinnedFolder(path: "/home/acme/public_html/wp-content/uploads"),
+                PinnedFolder(path: "/home/acme/logs"),
+            ]))
         list.append(Connection(
             id: id(2), name: "Bluebird Bakery", clientFolderId: folderIDs["Bluebird Bakery"], protocol: .sftp,
             host: "bluebirdbakery.example", username: "bluebird", authMethods: .both, keyPath: "~/.ssh/id_ed25519",
             elevation: .sudo, elevateFileBrowsing: true, isProd: true, favorite: true, tags: ["shop"],
-            lastConnectedAt: ago(2 * hour), createdAt: ago(180 * day)))
+            lastConnectedAt: ago(2 * hour), createdAt: ago(180 * day), trashOnDelete: true, keepVersionsOnOverwrite: true,
+            verifyChecksums: true, transferFilters: ["*.log", "/staging", "!error.log"], defaultConflictAction: .overwriteIfDifferent))
         list.append(Connection(
             id: id(3), name: "Fjord Marine (R2 assets)", clientFolderId: folderIDs["Fjord Marine"], protocol: .rclone,
             host: "https://0a1b2c.r2.cloudflarestorage.example", username: "AKIADEMO", favorite: true, tags: ["assets"],
@@ -148,7 +154,12 @@ enum DemoSeeder {
             try? await Task.sleep(nanoseconds: 100_000_000)
         }
         try? await Task.sleep(nanoseconds: 500_000_000)
-        enqueueTransfers(app, relay: DemoMode.screen == "sideBySide")
+        if ["transfers", "transfersFailed"].contains(DemoMode.screen) {
+            await app.queue.setMaxConcurrent(5)
+            enqueueTransferScreen(app, failures: DemoMode.screen == "transfersFailed")
+        } else {
+            enqueueTransfers(app, relay: DemoMode.screen == "sideBySide")
+        }
         await seedJournal(app, scope: acme.id)
         if let session = app.session(for: acme.id) {
             session.log.append(.command, "STOR archive-2026.zip")
@@ -191,6 +202,58 @@ enum DemoSeeder {
         Task { _ = await queue.enqueue(requests) }
     }
 
+    /// Several running, queued, finished and (for the Failed screen) failed transfers for the Transfers tab.
+    private static func enqueueTransferScreen(_ app: AppModel, failures: Bool) {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("dockyard-demo").path
+        try? FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+        let queue = app.queue
+        let local = TransferEndpoint.thisMac()
+        let server = TransferEndpoint(fs: DemoFileSystem(kind: .server), label: "Acme Corp")
+        let downloads: [(String, UInt64)] = [
+            ("db-2026-10-26.sql.gz", 480_000_000), ("site-2026-10-01.tar.gz", 1_820_000_000), ("db-2026-10-19.sql.gz", 471_300_000),
+            ("access.log", 18_204_113), ("uploads-2026-09.zip", 912_400_000), ("access-30-Sep.gz", 40_000),
+            ("access-29-Sep.gz", 49_113), ("access-28-Sep.gz", 58_226), ("access-27-Sep.gz", 67_339), ("access-26-Sep.gz", 76_452),
+        ]
+        var requests = downloads.map { name, size in
+            TransferRequest(
+                source: server, sourcePath: "/home/acme/backups/\(name)", destination: local, destinationPath: "\(folder)/\(name)",
+                size: size, modified: ago(day))
+        }
+        let finished: [(String, UInt64)] = [("header.php", 4_212), ("footer.php", 6_033), ("sidebar.php", 1_204)]
+        let target = TransferEndpoint(fs: DemoFileSystem(kind: .server), label: "Acme Corp")
+        let done = finished.map { name, size in
+            TransferRequest(
+                source: local, sourcePath: "\(folder)/\(name)", destination: target,
+                destinationPath: "/home/acme/public_html/wp-content/themes/acme-child/\(name)", size: size, modified: ago(hour))
+        }
+        var failing: [TransferRequest] = []
+        if failures {
+            let reasons: [(String, String)] = [
+                ("db-2026-09-28.sql.gz", "550 Permission denied"),
+                ("site-2026-09-01.tar.gz", "552 Disk quota exceeded"),
+                ("mail-export.mbox", "550 mail-export.mbox: No such file or directory"),
+                ("wp-content-2026-08.zip", "553 Could not create file"),
+                ("error.log", "550 Permission denied"),
+                ("cache-dump.sql", "550 Permission denied"),
+            ]
+            let broken = TransferEndpoint(
+                fs: DemoFileSystem(kind: .server, failures: Dictionary(uniqueKeysWithValues: reasons.map { ("/home/acme/backups/\($0.0)", $0.1) })),
+                label: "Acme Corp")
+            failing = reasons.map { name, _ in
+                TransferRequest(
+                    source: broken, sourcePath: "/home/acme/backups/\(name)", destination: local, destinationPath: "\(folder)/\(name)",
+                    size: 2_000_000, modified: ago(day))
+            }
+        }
+        if failures { requests = Array(requests.prefix(7)) }
+        Task {
+            _ = await queue.enqueue(done)
+            _ = await queue.enqueue(failing)
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            _ = await queue.enqueue(requests)
+        }
+    }
+
     /// Opens the screen named by `-DockyardDemoScreen`. `connectionManager` and `settings` are handled by the main window.
     static func applyScreen(_ app: AppModel) async {
         let acme = app.session(for: id(1))
@@ -201,6 +264,59 @@ enum DemoSeeder {
             app.drawerVisible = true
         case "jump":
             app.jumpVisible = true
+        case "transfers", "transfersFailed":
+            app.drawerHeight = 330
+            // The first rows are finished and failed ones; give the active ones a moment to start.
+            try? await Task.sleep(nanoseconds: 2_500_000_000)
+            if DemoMode.screen == "transfersFailed" {
+                app.transferUI.tab = .failed
+                app.showFailureToast(app.transfers.failedCount)
+            } else {
+                app.transferUI.tab = .active
+            }
+            app.drawerTab = .transfers
+            app.drawerVisible = true
+        case "versions":
+            if let acme { app.showVersions(for: acme) }
+        case "search":
+            guard let acme else { return }
+            let www = "/home/acme/public_html"
+            acme.server?.navigate(to: www)
+            let hits = [
+                SearchHit(path: "\(www)/wp-config.php", isDirectory: false, size: 3_163, modified: ago(14 * day)),
+                SearchHit(path: "\(www)/wp-config-sample.php", isDirectory: false, size: 2_994, modified: ago(60 * day)),
+                SearchHit(path: "\(www)/staging/wp-config.php", isDirectory: false, size: 3_105, modified: ago(12 * day)),
+                SearchHit(path: "\(www)/wp-content/themes/acme-child/wp-config-local.php", isDirectory: false, size: 1_411, modified: ago(20 * day)),
+                SearchHit(path: "\(www)/old-site/wp-config.php.bak", isDirectory: false, size: 3_040, modified: ago(210 * day)),
+            ]
+            app.safety.search(for: acme).seedDemo(
+                root: www, hits: hits, summary: SearchSummary(hits: hits.count, usedShell: false))
+        case "watchFolders":
+            let link = { (connection: Int, local: String, remote: String, mirror: Bool, paused: Bool) in
+                WatchLink(connectionId: id(connection), localRoot: local, remoteRoot: remote, mirrorDeletes: mirror, paused: paused)
+            }
+            let theme = link(1, "/Users/demo/Sites/acme/wp-content/themes/acme-child", "/home/acme/public_html/wp-content/themes/acme-child", false, false)
+            let menu = link(2, "/Users/demo/Sites/bluebird/menu", "/home/bluebird/public_html/menu", true, true)
+            let api = link(4, "/Users/demo/Sites/api/dist", "/srv/api/current", false, false)
+            app.watches.seedDemo(
+                [theme, menu, api],
+                status: [
+                    theme.id: WatchStatus(uploaded: 14, skipped: 3, lastActivity: Date().addingTimeInterval(-140)),
+                    menu.id: WatchStatus(uploaded: 6, deleted: 1),
+                    api.id: WatchStatus(uploaded: 126, skipped: 41, lastActivity: Date().addingTimeInterval(-3_000)),
+                ])
+        case "siteEditorSafety":
+            if let c = app.allConnections.first(where: { $0.id == id(2) }) { app.editConnection(c, origin: .main) }
+        case "launchPrompt":
+            Task { _ = await app.prompts.askLeftovers(queued: 340, failed: 12) }
+        case "conflict":
+            Task {
+                _ = await app.prompts.askConflict(ConflictInfo(
+                    jobId: UUID(), name: "wp-config.php", route: "This Mac \u{2192} Acme Corp",
+                    sourcePath: "/Users/demo/Sites/acme/wp-config.php", destinationPath: "/home/acme/public_html/wp-config.php",
+                    sourceSize: 3_412, sourceModified: DemoMode.anchor.addingTimeInterval(-3_600),
+                    destinationSize: 3_163, destinationModified: DemoMode.anchor.addingTimeInterval(-14 * day), direction: .upload))
+            }
         case "siteEditor":
             if let c = app.allConnections.first(where: { $0.id == id(2) }) { app.editConnection(c, origin: .main) }
         case "siteEditorJump":

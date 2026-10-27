@@ -51,12 +51,15 @@ extension ConflictPolicy {
         case .overwriteIfNewer: 2
         case .skip: 3
         case .rename: 4
+        case .overwriteIfDifferent: 5
+        case .overwriteIfSizeDiffers: 6
+        case .resume: 7
         }
     }
 
     init?(dbValue: Int?) {
         guard let dbValue else { return nil }
-        self = [.ask, .overwrite, .overwriteIfNewer, .skip, .rename][min(max(dbValue, 0), 4)]
+        self = [.ask, .overwrite, .overwriteIfNewer, .skip, .rename, .overwriteIfDifferent, .overwriteIfSizeDiffers, .resume][min(max(dbValue, 0), 7)]
     }
 }
 
@@ -99,6 +102,7 @@ struct JobRecord: Sendable {
     var name: String { RemotePath.lastComponent(of: destPath) }
     var route: String { "\(srcLabel) → \(dstLabel)" }
     var isRelay: Bool { srcSite != nil && dstSite != nil }
+    var direction: ConflictDirection { isRelay ? .relay : (srcSite == nil ? .upload : .download) }
 
     static let columns = """
         id, parentId, rootId, siteKey, srcSite, dstSite, srcLabel, dstLabel, sourcePath, destPath, isDirectory, size, \

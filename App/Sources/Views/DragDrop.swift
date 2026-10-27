@@ -106,11 +106,53 @@ enum DropHandler {
             Task { await session.move(items, to: directory, in: pane.side) }
         case .copy:
             let source = resolved.originSession ?? session
+            var rule: ConflictPolicy?
+            if option, resolved.originSession == nil {
+                // Option on a transfer between this Mac and a server asks which rule to use for existing files.
+                guard let chosen = ConflictRuleMenu.choose(for: info) else {
+                    DragState.clear()
+                    return false
+                }
+                rule = chosen == .ask ? nil : chosen
+            }
             app.transfer(
                 resolved.items, from: source, resolved.originSide, to: session, pane.side, directory: directory,
-                move: resolved.originSession != nil && option)
+                move: resolved.originSession != nil && option, conflict: rule)
         }
         DragState.clear()
         return true
+    }
+}
+
+/// A small menu of the rules for existing files, shown where the user dropped while holding Option.
+@MainActor
+enum ConflictRuleMenu {
+    /// The chosen rule (`.ask` for "use the default"), or nil when the menu was dismissed.
+    static func choose(for info: NSDraggingInfo) -> ConflictPolicy? {
+        let menu = NSMenu(title: "Existing files")
+        let header = NSMenuItem(title: "If a file already exists", action: nil, keyEquivalent: "")
+        header.isEnabled = false
+        menu.addItem(header)
+        var chosen: ConflictPolicy?
+        let handler = RuleHandler { chosen = $0 }
+        for policy in ConflictPolicy.allCases {
+            let item = NSMenuItem(title: policy == .ask ? "Use the default" : policy.title, action: #selector(RuleHandler.pick(_:)), keyEquivalent: "")
+            item.target = handler
+            item.representedObject = policy.rawValue
+            menu.addItem(item)
+            if policy == .ask { menu.addItem(.separator()) }
+        }
+        let view = info.draggingDestinationWindow?.contentView
+        let location = view.map { $0.convert(info.draggingLocation, from: nil) } ?? .zero
+        menu.popUp(positioning: nil, at: location, in: view)
+        return chosen
+    }
+
+    private final class RuleHandler: NSObject {
+        let onPick: (ConflictPolicy) -> Void
+        init(onPick: @escaping (ConflictPolicy) -> Void) { self.onPick = onPick }
+        @objc func pick(_ sender: NSMenuItem) {
+            if let raw = sender.representedObject as? String, let policy = ConflictPolicy(rawValue: raw) { onPick(policy) }
+        }
     }
 }

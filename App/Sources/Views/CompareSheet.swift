@@ -33,9 +33,10 @@ final class CompareModel {
         let (lp, rp, deep) = (localPath, serverPath, recursive)
         // FTP servers report times to the minute, so equal means within a minute there.
         let tolerance: TimeInterval = session.connection.protocol == .ftp || session.connection.protocol == .ftps ? 61 : 2
+        let filter = TransferFilter(patterns: AppSettings.globalFilterPatterns + session.connection.transferFilters)
         task = Task {
             do {
-                let result = try await FolderComparator(timeTolerance: tolerance)
+                let result = try await FolderComparator(timeTolerance: tolerance, filter: filter)
                     .compare(left: left, leftPath: lp, right: right, rightPath: rp, recursive: deep)
                 try Task.checkCancellation()
                 self.entries = result

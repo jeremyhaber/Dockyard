@@ -19,10 +19,11 @@ struct DrawerView: View {
                 Picker("Drawer", selection: $app.drawerTab) {
                     Text("Log").tag(DrawerTab.log)
                     Text("Terminal").tag(DrawerTab.terminal)
+                    Text("Transfers").tag(DrawerTab.transfers)
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
-                .frame(width: 180)
+                .frame(width: 270)
                 if app.drawerTab == .terminal, let session, session.status.isConnected, session.shellAvailable {
                     terminalControls(session)
                 }
@@ -63,6 +64,8 @@ struct DrawerView: View {
                     } else {
                         placeholder(icon: "terminal", text: "Open a connection to use its terminal.")
                     }
+                case .transfers:
+                    TransfersView()
                 }
             }
         }

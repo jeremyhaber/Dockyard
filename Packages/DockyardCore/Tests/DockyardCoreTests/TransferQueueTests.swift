@@ -196,7 +196,6 @@ func upload(_ env: TransferEnv, _ rel: String, to server: TransferEndpoint, _ de
         await q.waitUntilIdle()
         #expect(asked.withLock { $0.count } == 1)
         #expect(["a", "b", "c"].allSatisfy { server.text("/d/\($0).txt") == "new-\($0)" })
-        #expect(await q.conflictPolicy == .overwrite)
         let info = try #require(asked.withLock { $0.first })
         #expect(info.destinationSize == 3 && info.route == "This Mac → PROD")
     }
@@ -467,6 +466,35 @@ func upload(_ env: TransferEnv, _ rel: String, to server: TransferEndpoint, _ de
         await q.retry(id)
         await q.waitUntilIdle()
         #expect(server.calls.filter { $0.hasPrefix("upload") }.count == 1)
+    }
+
+    @Test func removeFailedForgetsOnlyFailures() async throws {
+        let env = try TransferEnv()
+        try env.write("a", "a"); try env.write("b", "b")
+        let server = FakeFileSystem(); server.makeDir("/d")
+        server.failNext("/d/b", times: 5)
+        let q = env.queue()
+        let ep = TransferEndpoint(fs: server, label: "S")
+        await q.enqueue(["a", "b"].map { upload(env, $0, to: ep, "/d/\($0)") })
+        await q.waitUntilIdle()
+        await q.removeFailed()
+        let snap = await q.snapshot()
+        #expect(snap.failedCount == 0 && snap.completedCount == 1)
+        #expect(snap.jobs.count == 1 && snap.jobs[0].state == .completed)
+    }
+
+    @Test func removeFinishedForgetsCancelledOnlyWhenAsked() async throws {
+        let env = try TransferEnv()
+        try env.write("a", "a")
+        let server = FakeFileSystem(); server.makeDir("/d")
+        let q = env.queue()
+        await q.pause()
+        await q.enqueue(upload(env, "a", to: TransferEndpoint(fs: server, label: "S"), "/d/a"))
+        await q.cancelAll()
+        await q.removeFinished()
+        #expect(await q.count() == 1)
+        await q.removeFinished(includingCancelled: true)
+        #expect(await q.count() == 0)
     }
 
     @Test func removeFinishedKeepsFailures() async throws {

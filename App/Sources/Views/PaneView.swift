@@ -26,14 +26,17 @@ struct PaneView: View {
         VStack(spacing: 0) {
             PathBar(pane: pane, session: session)
             Divider()
+            if pane.side == .server { PinsBar(pane: pane, session: session) }
             FolderTreeView(pane: pane, session: session, version: pane.treeSignature)
                 .frame(height: shown)
             TreeResizeHandle(height: shown) { treeHeight = $0 }
             FolderTabsBar(pane: pane)
             Divider()
+            if pane.side == .server { SearchBar(pane: pane, session: session) }
             ZStack {
                 FileTableView(pane: pane, session: session, version: pane.rowsVersion, sort: pane.sort)
                     .frame(minHeight: TreeLayout.minListHeight)
+                if pane.side == .server { SearchResults(session: session) }
                 if let message = pane.errorMessage {
                     VStack(spacing: 6) {
                         Image(systemName: "exclamationmark.triangle")
@@ -173,6 +176,7 @@ struct PathBar: View {
                     .popover(isPresented: $showHistory, arrowEdge: .bottom) {
                         HistoryPopover(pane: pane, session: session) { showHistory = false }
                     }
+                PinButton(pane: pane, session: session)
             }
             Button { showRecent.toggle() } label: { Image(systemName: "arrow.uturn.backward.circle") }
                 .help("Recent changes and Undo")
@@ -239,6 +243,7 @@ struct HistoryPopover: View {
                 .foregroundStyle(Palette.textSecondary)
                 .padding(10)
             Divider()
+            PinnedSection(pane: pane, session: session, dismiss: dismiss)
             if entries.isEmpty {
                 Text("No history yet")
                     .foregroundStyle(Palette.textSecondary)

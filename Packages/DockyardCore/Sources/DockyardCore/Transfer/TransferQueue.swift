@@ -70,6 +70,9 @@ public actor TransferQueue {
     public internal(set) var isPaused = false
     /// Unfinished jobs found in the database when the queue was created. They stay paused until `resume()`.
     public let restoredJobCount: Int
+    /// File-level counts left by the previous session: waiting to run, and failed (failed items stay listed until retried or cleared).
+    public let restoredQueuedCount: Int
+    public let restoredFailedCount: Int
 
     var ops: [Op] = []
     var rollupTotal: [Int64: Int64] = [:]
@@ -87,6 +90,17 @@ public actor TransferQueue {
     var finishWaiters: [Int64: [CheckedContinuation<TransferState, Never>]] = [:]
     var lastRateSample: (time: Date, bytes: UInt64)?
     var smoothedRate = 0.0
+
+    /// Folder children skipped by transfer filters (in memory; reset by `removeFinished`).
+    var filteredCount = 0
+    var skipReasons: [SkipReason: Int] = [:]
+    /// Decisions the user applied beyond one file. Batch, uploads and downloads end when the queue empties.
+    var rememberedBatch: ConflictAction?
+    var rememberedUploads: ConflictAction?
+    var rememberedDownloads: ConflictAction?
+    var rememberedSession: ConflictAction?
+    /// Source path of each expanding top-level folder, to turn child paths into paths relative to the transfer root.
+    var rootPaths: [Int64: String] = [:]
 
     var resolving = false
     var resolveWaiters: [CheckedContinuation<Void, Never>] = []
@@ -127,6 +141,8 @@ public actor TransferQueue {
         nextId = recovered.maxId + 1
         stats = recovered.stats
         restoredJobCount = recovered.unfinished
+        restoredQueuedCount = recovered.stats.queued
+        restoredFailedCount = recovered.stats.failed
         isPaused = recovered.unfinished > 0
         trackers = recovered.trackers
         for (key, label) in recovered.siteKeys {
@@ -158,6 +174,11 @@ public actor TransferQueue {
 
     /// Sets the policy for everything not yet decided (also clears a previous "apply to all").
     public func setConflictPolicy(_ policy: ConflictPolicy) { conflictPolicy = policy }
+
+    /// Forgets every remembered "apply to" decision, including "this session".
+    public func forgetConflictDecisions() {
+        rememberedBatch = nil; rememberedUploads = nil; rememberedDownloads = nil; rememberedSession = nil
+    }
 
     func siteState(_ key: String, label: String) -> SiteState {
         if let s = sites[key] { return s }
@@ -207,13 +228,14 @@ public actor TransferQueue {
     @discardableResult
     public func enqueue(
         items: [RemoteItem], from source: TransferEndpoint, to destination: TransferEndpoint,
-        into destinationDirectory: String, move: Bool = false
+        into destinationDirectory: String, move: Bool = false, conflict: ConflictPolicy? = nil
     ) -> [UUID] {
         enqueue(items.map { item in
             TransferRequest(
                 source: source, sourcePath: item.path, destination: destination,
                 destinationPath: RemotePath.join(destinationDirectory, item.name),
-                isDirectory: item.isDirectory, size: item.size, modified: item.modified, deleteSourceAfter: move)
+                isDirectory: item.isDirectory, size: item.size, modified: item.modified, deleteSourceAfter: move,
+                conflictOverride: conflict)
         })
     }
 
@@ -575,6 +597,7 @@ public actor TransferQueue {
         stats.add(record)
         persist(record)
         trackers.removeValue(forKey: record.id)
+        if record.parentId == nil { rootPaths.removeValue(forKey: record.id) }
         if let parent = record.parentId {
             if !record.isDirectory, state == .completed { rollupDone[record.rootId, default: 0] += Int64(clamping: record.bytesDone) }
             childFinished(parent, state: state)
@@ -603,18 +626,21 @@ public actor TransferQueue {
 
     // MARK: Files
 
-    private enum ConflictOutcome { case proceed, skip, cancel }
+    private enum ConflictOutcome { case proceed, resume, skip(SkipReason), cancel }
 
     private func transferFile(_ job: ActiveJob, _ route: Route) async throws -> Outcome {
         let rec = job.record
         if rec.createParents { try await Self.ensureDirectory(route.dst, RemotePath.parent(of: rec.destPath)) }
 
-        let resume = rec.resume
+        var resume = rec.resume
+        var replacing = false
         if !resume, let existing = try await route.dst.lookup(rec.destPath) {
             switch try await resolveConflict(job, existing: existing, route: route) {
-            case .proceed: break
-            case .skip:
-                log.emit(.status, "Skipped \(job.record.name): already exists")
+            case .proceed: replacing = job.record.destPath == rec.destPath
+            case .resume: resume = true
+            case .skip(let reason):
+                skipReasons[reason, default: 0] += 1
+                log.emit(.status, "Skipped \(job.record.name): \(reason == .unchanged ? "unchanged" : "already exists")")
                 return .skipped
             case .cancel:
                 job.cancelRequested = true
@@ -622,6 +648,9 @@ public actor TransferQueue {
             }
         }
         job.record.resume = false
+        if replacing, let hook = job.record.dstSite.flatMap({ sites[$0]?.profile?.beforeOverwrite }) {
+            try await hook(job.record.destPath, route.dst)
+        }
         if job.record.modified == nil && preserveTimestamps {
             job.record.modified = try? await route.src.lookup(rec.sourcePath)?.modified
         }
@@ -638,10 +667,28 @@ public actor TransferQueue {
         try await Self.perform(req, route: route, resume: resume, tempRoot: tempDirectory,
                                preserveTimestamps: preserveTimestamps, interval: progressInterval, sample: sample)
         if job.cancelRequested { throw CancellationError() }
+        try await verifyChecksum(job.record, route)
         job.record.bytesDone = max(job.progressDone, job.record.bytesTotal)
         if req.deleteSource { try await route.src.delete(req.sourcePath, recursive: false) }
         log.emit(.status, "Completed \(req.name) (\(req.route))")
         return .completed
+    }
+
+    /// After an upload or download on a site that asks for it. Server to server copies are not checked.
+    private func verifyChecksum(_ rec: JobRecord, _ route: Route) async throws {
+        guard (rec.srcSite == nil) != (rec.dstSite == nil) else { return }
+        let uploading = rec.srcSite == nil
+        guard let key = uploading ? rec.dstSite : rec.srcSite, sites[key]?.profile?.verifyChecksums == true else { return }
+        let result = await ChecksumVerifier.verify(
+            local: URL(fileURLWithPath: uploading ? rec.sourcePath : rec.destPath),
+            remote: uploading ? rec.destPath : rec.sourcePath, on: uploading ? route.dst : route.src)
+        switch result {
+        case .match: log.emit(.status, "Verified checksum of \(rec.name)")
+        case .unavailable(let reason): log.emit(.warning, "Checksum of \(rec.name) not verified: \(reason)")
+        case .mismatch(let local, let remote):
+            log.emit(.error, "Checksum mismatch for \(rec.name): this Mac \(local), server \(remote)")
+            throw RemoteError.protocolError("Checksum mismatch: the copy on the server differs from the local file")
+        }
     }
 
     private func updateTotal(_ job: ActiveJob, size: UInt64) {
@@ -667,13 +714,26 @@ public actor TransferQueue {
         if existing.isDirectory {
             throw RemoteError.protocolError("A folder named \(job.record.name) already exists at the destination")
         }
-        switch await decideConflict(job, existing: existing) {
+        let action = await decideConflict(job, existing: existing)
+        switch action {
         case .overwrite: return .proceed
-        case .skip: return .skip
+        case .skip: return .skip(.kept)
         case .cancel: return .cancel
-        case .overwriteIfNewer:
-            guard let src = job.record.modified, let dst = existing.modified else { return .proceed }
-            return src.timeIntervalSince(dst) > timestampTolerance ? .proceed : .skip
+        case .overwriteIfNewer, .overwriteIfDifferent, .overwriteIfSizeDiffers, .resume:
+            var size = job.record.size, modified = job.record.modified
+            if size == nil || modified == nil, let source = try? await route.src.lookup(job.record.sourcePath) {
+                size = size ?? source.size
+                modified = modified ?? source.modified
+            }
+            if action == .resume {
+                guard let size, let have = existing.size else { return .proceed }
+                if have == size { return .skip(.unchanged) }
+                return have < size ? .resume : .proceed
+            }
+            let replace = action.replaces(
+                sourceSize: size, sourceModified: modified, destinationSize: existing.size,
+                destinationModified: existing.modified, tolerance: timestampTolerance)
+            return replace ? .proceed : .skip(.unchanged)
         case .rename:
             var n = 1
             let dir = RemotePath.parent(of: job.record.destPath)
@@ -689,7 +749,8 @@ public actor TransferQueue {
         }
     }
 
-    /// Serialises "ask" prompts; once the user chose apply-to-all, later files skip the prompt.
+    /// The per-batch override, then remembered "apply to" decisions, the site's default and the queue's policy; otherwise ask.
+    /// Prompts are serialised, so a decision applied to later files is in place before the next one is asked.
     private func decideConflict(_ job: ActiveJob, existing: RemoteItem) async -> ConflictAction {
         while resolving { await withCheckedContinuation { resolveWaiters.append($0) } }
         resolving = true
@@ -697,27 +758,31 @@ public actor TransferQueue {
             resolving = false
             if !resolveWaiters.isEmpty { resolveWaiters.removeFirst().resume() }
         }
-        switch job.record.conflict ?? conflictPolicy {
-        case .overwrite: return .overwrite
-        case .overwriteIfNewer: return .overwriteIfNewer
-        case .skip: return .skip
-        case .rename: return .rename
-        case .ask: break
-        }
-        guard let resolver else { return .skip }  // nobody to ask: never overwrite silently
         let rec = job.record
+        let direction = rec.direction
+        let siteDefault = [rec.dstSite, rec.srcSite].compactMap { $0.flatMap { sites[$0]?.profile?.defaultConflict } }.first { $0 != .ask }
+        let known = rec.conflict?.action
+            ?? (direction == .upload ? rememberedUploads : nil)
+            ?? (direction == .download ? rememberedDownloads : nil)
+            ?? rememberedBatch ?? rememberedSession
+            ?? siteDefault?.action ?? conflictPolicy.action
+        if let known { return known }
+        guard let resolver else { return .skip }  // nobody to ask: never overwrite silently
         let info = ConflictInfo(
             jobId: JobID.uuid(rec.id), name: rec.name, route: rec.route, sourcePath: rec.sourcePath, destinationPath: rec.destPath,
-            sourceSize: rec.size, sourceModified: rec.modified, destinationSize: existing.size, destinationModified: existing.modified)
+            sourceSize: rec.size, sourceModified: rec.modified, destinationSize: existing.size, destinationModified: existing.modified,
+            direction: direction)
         let decision = await resolver(info)
-        if decision.applyToAll {
-            switch decision.action {
-            case .overwrite: conflictPolicy = .overwrite
-            case .overwriteIfNewer: conflictPolicy = .overwriteIfNewer
-            case .skip: conflictPolicy = .skip
-            case .rename: conflictPolicy = .rename
-            case .cancel: Task { await self.cancelAll() }
-            }
+        if decision.action == .cancel {
+            if decision.scope != .thisFile { Task { await self.cancelAll() } }
+            return .cancel
+        }
+        switch decision.scope {
+        case .thisFile: break
+        case .allRemaining: rememberedBatch = decision.action
+        case .uploadsOnly: rememberedUploads = decision.action
+        case .downloadsOnly: rememberedDownloads = decision.action
+        case .session: rememberedSession = decision.action
         }
         return decision.action
     }

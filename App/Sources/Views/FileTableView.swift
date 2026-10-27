@@ -436,6 +436,17 @@ final class FileTableCoordinator: NSObject, NSTableViewDataSource, NSTableViewDe
         } else {
             add("Download", #selector(menuTransfer), enabled: hasSelection)
         }
+        let with = NSMenuItem(title: pane.side == .local ? "Upload with\u{2026}" : "Download with\u{2026}", action: nil, keyEquivalent: "")
+        with.isEnabled = hasSelection && (pane.side == .server || session.status.isConnected)
+        let rules = NSMenu()
+        for policy in ConflictPolicy.allCases where policy != .ask {
+            let rule = NSMenuItem(title: policy.title, action: #selector(menuTransferWith(_:)), keyEquivalent: "")
+            rule.target = self
+            rule.representedObject = policy.rawValue
+            rules.addItem(rule)
+        }
+        with.submenu = rules
+        menu.addItem(with)
         menu.addItem(.separator())
         add("Rename…", #selector(menuRename), enabled: items.count == 1)
         add("Delete…", #selector(menuDelete), enabled: hasSelection)
@@ -447,7 +458,14 @@ final class FileTableCoordinator: NSObject, NSTableViewDataSource, NSTableViewDe
         add("Extract to\u{2026}", #selector(menuExtractTo), enabled: canExtract)
         menu.addItem(.separator())
         add("Copy Path", #selector(menuCopyPath), enabled: hasSelection)
-        if pane.side == .server { add("Permissions…", #selector(menuChmod), enabled: hasSelection) }
+        if pane.side == .server {
+            add("Permissions…", #selector(menuChmod), enabled: hasSelection)
+            let folder = items.count == 1 && items[0].isDirectory ? items[0].path : pane.currentPath
+            let pinned = app.safety.isPinned(folder, on: session.connection.id)
+            add(pinned ? "Unpin Folder" : "Pin Folder", #selector(menuPin))
+            add("Search This Folder\u{2026}", #selector(menuSearch))
+            add("Versions\u{2026}", #selector(menuVersions), enabled: session.status.isConnected)
+        }
         add("Refresh", #selector(menuRefresh))
     }
 
@@ -459,16 +477,32 @@ final class FileTableCoordinator: NSObject, NSTableViewDataSource, NSTableViewDe
         if let item = pane.selectedItems.first { pane.openTab(at: item.path, activate: false) }
     }
 
-    @objc private func menuTransfer() {
+    @objc private func menuTransfer() { transferSelection(conflict: nil) }
+
+    @objc private func menuTransferWith(_ sender: NSMenuItem) {
+        transferSelection(conflict: (sender.representedObject as? String).flatMap(ConflictPolicy.init(rawValue:)))
+    }
+
+    private func transferSelection(conflict: ConflictPolicy?) {
         let items = pane.selectedItems
         if pane.side == .local {
             guard let server = session.server else { return }
-            app.transfer(items, from: session, .local, to: session, .server, directory: server.currentPath, move: false)
+            app.transfer(items, from: session, .local, to: session, .server, directory: server.currentPath, move: false, conflict: conflict)
         } else {
             guard let local = session.local else { return }
-            app.transfer(items, from: session, .server, to: session, .local, directory: local.currentPath, move: false)
+            app.transfer(items, from: session, .server, to: session, .local, directory: local.currentPath, move: false, conflict: conflict)
         }
     }
+
+    @objc private func menuPin() {
+        let items = pane.selectedItems
+        let folder = items.count == 1 && items[0].isDirectory ? items[0].path : pane.currentPath
+        app.safety.togglePin(folder, on: session.connection.id)
+    }
+
+    @objc private func menuSearch() { app.openSearch() }
+
+    @objc private func menuVersions() { app.showVersions(for: session) }
 
     @objc private func menuCompress() {
         app.archives.compress(pane.selectedItems, in: session, side: pane.side, app: app)

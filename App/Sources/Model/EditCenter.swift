@@ -35,9 +35,11 @@ final class EditCenter {
         let id = session.connection.id
         let name = session.connection.name
         let coordinator = self.coordinator
+        let keepVersion = AppModel.shared.overwriteHook(for: session.connection)
         Task {
             do {
-                let edit = try await coordinator.open(fs: fs, remotePath: item.path, connectionId: id, connectionName: name)
+                let edit = try await coordinator.open(
+                    fs: fs, remotePath: item.path, connectionId: id, connectionName: name, beforeOverwrite: keepVersion)
                 await self.refresh()
                 NSWorkspace.shared.open(edit.localURL)
             } catch {

@@ -44,6 +44,14 @@ struct ToastView: View {
                 .buttonStyle(.link)
                 .font(.system(size: 12, weight: .semibold))
             }
+            if toast.link == .failedTransfers {
+                Button("View") {
+                    app.toasts.removeAll { $0.id == toast.id }
+                    app.showFailedTransfers()
+                }
+                .buttonStyle(.link)
+                .font(.system(size: 12, weight: .semibold))
+            }
             Button {
                 app.toasts.removeAll { $0.id == toast.id }
             } label: {

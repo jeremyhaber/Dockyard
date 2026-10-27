@@ -128,6 +128,9 @@ struct SidebarRow: View {
             }
             .disabled(!MountPolicy.canMount(connection))
             Button("Open Side by Side") { app.openSideBySide(connection) }
+            if app.canOpenCPanel(connection) {
+                Button("Open cPanel") { app.openCPanel(for: connection) }
+            }
             Button("Edit\u{2026}") { app.editConnection(connection, origin: .main) }
         }
         .accessibilityElement(children: .combine)

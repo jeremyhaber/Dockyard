@@ -109,16 +109,23 @@ extension TransferQueue {
 
     // MARK: Removal
 
-    /// Forgets completed and skipped top-level jobs together with their children.
-    public func removeFinished() {
+    /// Forgets completed and skipped top-level jobs together with their children; cancelled ones too when asked.
+    public func removeFinished(includingCancelled: Bool = false) { remove(topLevelStates: includingCancelled ? "2, 4, 5" : "2, 5") }
+
+    /// Forgets failed top-level jobs together with their children.
+    public func removeFailed() { remove(topLevelStates: "3") }
+
+    private func remove(topLevelStates states: String) {
         persistActive()
         flushSync()
         try? writer.write { db in
             try db.run("""
-                DELETE FROM transferJob WHERE rootId IN (SELECT id FROM transferJob WHERE parentId IS NULL AND state IN (2, 5))
+                DELETE FROM transferJob WHERE rootId IN (SELECT id FROM transferJob WHERE parentId IS NULL AND state IN (\(states)))
                 """)
         }
         reloadStats()
+        filteredCount = 0
+        skipReasons = [:]
         publishSoon()
     }
 
@@ -195,6 +202,7 @@ extension TransferQueue {
     var isIdle: Bool { active.isEmpty && stats.queued == 0 && stats.active == 0 }
 
     func checkIdle() {
+        if isIdle { rememberedBatch = nil; rememberedUploads = nil; rememberedDownloads = nil }
         guard isIdle, !idleWaiters.isEmpty else { return }
         let waiters = idleWaiters
         idleWaiters.removeAll()
