@@ -129,7 +129,7 @@ struct CompareSheet: View {
             Divider()
             footer
         }
-        .frame(width: 820, height: 560)
+        .frame(width: 900, height: 540)
         .background(Palette.ground)
         .task { model.reload() }
     }
@@ -181,8 +181,8 @@ struct CompareSheet: View {
         HStack(spacing: 8) {
             Color.clear.frame(width: 44)
             Text("Name").frame(maxWidth: .infinity, alignment: .leading)
-            Text("This Mac").frame(width: 150, alignment: .leading)
-            Text("Server").frame(width: 150, alignment: .leading)
+            Text("This Mac").frame(width: 176, alignment: .leading)
+            Text("Server").frame(width: 176, alignment: .leading)
         }
         .font(.system(size: 11, weight: .semibold))
         .foregroundStyle(Palette.textSecondary)
@@ -298,15 +298,16 @@ struct CompareRow: View {
         HStack(spacing: 4) {
             if let item {
                 Text(item.isDirectory ? "Folder" : FileDisplay.size(item.size))
-                    .frame(width: 52, alignment: .trailing)
+                    .frame(width: 54, alignment: .trailing)
                 Text(FileDisplay.modifiedCompact(item.modified))
-                    .frame(width: 84, alignment: .leading)
+                    .lineLimit(1)
+                    .frame(width: 100, alignment: .leading)
                 if newer { Image(systemName: "arrow.up").font(.system(size: 9, weight: .bold)).foregroundStyle(Color.accentColor) }
             } else {
                 Text("\u{2013}").foregroundStyle(Palette.textSecondary)
             }
         }
         .font(.system(size: 11, design: .monospaced))
-        .frame(width: 150, alignment: .leading)
+        .frame(width: 176, alignment: .leading)
     }
 }

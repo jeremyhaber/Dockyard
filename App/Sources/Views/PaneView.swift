@@ -15,12 +15,14 @@ struct PaneView: View {
             PathBar(pane: pane, session: session)
             Divider()
             FolderTreeView(pane: pane, session: session, version: pane.treeSignature)
-                .frame(height: treeHeight)
+                .frame(minHeight: 50, idealHeight: treeHeight, maxHeight: treeHeight)
+                .layoutPriority(-1)
             resizeHandle
             FolderTabsBar(pane: pane)
             Divider()
             ZStack {
                 FileTableView(pane: pane, session: session, version: pane.rowsVersion, sort: pane.sort)
+                    .frame(minHeight: 60)
                 if let message = pane.errorMessage {
                     VStack(spacing: 6) {
                         Image(systemName: "exclamationmark.triangle")

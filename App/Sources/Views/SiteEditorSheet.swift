@@ -41,7 +41,7 @@ struct SiteEditorSheet: View {
             Divider()
             buttons
         }
-        .frame(width: 600, height: 700)
+        .frame(width: 600, height: 620)
         .task {
             clientFolders = (try? await app.folders.all()) ?? []
             if let id = request.connection?.id {

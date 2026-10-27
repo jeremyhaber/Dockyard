@@ -15,9 +15,9 @@ shoot() { # name, appearance (light|dark), screen
   "$bin" -DockyardDemo YES -DockyardAppearance "$look" -DockyardDemoScreen "$screen" \
     -DockyardWindowSize 1440x900 -DockyardWindowIDFile "$idfile" -ApplePersistenceIgnoreState YES >"$out/$name.log" 2>&1 &
   local pid=$!
-  sleep 12
+  for _ in $(seq 1 40); do [ -s "$idfile" ] && break; sleep 1; done
   osascript -e 'tell application "System Events" to set frontmost of (first process whose unix id is '"$pid"') to true' >/dev/null 2>&1
-  sleep 2
+  sleep 3
   local id=""
   if [ -s "$idfile" ]; then id="$(cat "$idfile")"; else id="$("$RUNNER_TEMP/window-id" Dockyard)"; fi
   if [ -n "$id" ]; then

@@ -24,13 +24,18 @@ struct WindowAccessor: NSViewRepresentable {
 enum DemoWindows {
     static func register(_ kind: String, _ window: NSWindow) {
         guard DemoMode.isEnabled else { return }
-        if kind == "main", let size = DemoMode.windowSize {
-            let visible = (window.screen ?? NSScreen.main)?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
-            window.setFrame(NSRect(x: visible.minX, y: visible.maxY - size.height, width: size.width, height: size.height), display: true)
-        }
-        guard kind == DemoMode.targetWindow else { return }
+        let target = kind == DemoMode.targetWindow
         Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            // Sheets and popovers make AppKit fit the window to the screen again, so the size is re-applied until the shot.
+            for _ in 0..<12 {
+                if kind == "main", let size = DemoMode.windowSize {
+                    let visible = (window.screen ?? NSScreen.main)?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+                    let wanted = NSRect(x: visible.minX, y: visible.maxY - size.height, width: size.width, height: size.height)
+                    if window.frame.size != wanted.size { window.setFrame(wanted, display: true) }
+                }
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+            }
+            guard target else { return }
             window.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             guard let path = DemoMode.windowIDFile else { return }

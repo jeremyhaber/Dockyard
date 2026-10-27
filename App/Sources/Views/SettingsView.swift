@@ -45,7 +45,7 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 520, height: 560)
+        .frame(width: 520, height: 640)
         .background(WindowAccessor { window in DemoWindows.register("settings", window) })
     }
 

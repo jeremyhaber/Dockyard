@@ -302,6 +302,8 @@ struct WorkArea: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .clipped()
         .background(Palette.ground)
     }
 }

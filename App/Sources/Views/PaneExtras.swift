@@ -9,10 +9,18 @@ struct BreadcrumbBar: View {
 
     var body: some View {
         let segments = pane.state.breadcrumbs
-        ViewThatFits(in: .horizontal) {
-            ForEach(0..<max(segments.count, 1), id: \.self) { hidden in
-                row(segments, hidden: hidden)
+        HStack(spacing: 0) {
+            // Each candidate is measured at its natural width, so the first one that fits wins.
+            ViewThatFits(in: .horizontal) {
+                ForEach(0..<max(segments.count, 1), id: \.self) { hidden in
+                    row(segments, hidden: hidden).fixedSize(horizontal: true, vertical: false)
+                }
             }
+            .layoutPriority(1)
+            Color.clear
+                .frame(minWidth: 12, maxWidth: .infinity)
+                .contentShape(Rectangle())
+                .onTapGesture(perform: onEmptyTap)
         }
     }
 
@@ -49,10 +57,6 @@ struct BreadcrumbBar: View {
                     .accessibilityLabel(segment.path)
                 if segment.path != pane.currentPath { chevron }
             }
-            Color.clear
-                .frame(minWidth: 12, maxWidth: .infinity)
-                .contentShape(Rectangle())
-                .onTapGesture(perform: onEmptyTap)
         }
     }
 
@@ -118,7 +122,7 @@ struct RecentChangesPopover: View {
                         }
                     }
                 }
-                .frame(maxHeight: 320)
+                .frame(height: min(CGFloat(entries.count) * 58, 320))
             }
             Divider()
             HStack {

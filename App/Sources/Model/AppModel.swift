@@ -471,7 +471,7 @@ final class AppModel {
         try? await connections.markConnected(c.id)
         session.setBrowsingAsRoot(await Self.isBrowsingAsRoot(fs))
         let home = (try? await fs.homeDirectory()) ?? "/"
-        var localHome = AppSettings.localFolder ?? NSHomeDirectory()
+        var localHome = DemoMode.isEnabled ? "/Users/demo" : (AppSettings.localFolder ?? NSHomeDirectory())
         if let folder = c.localFolder, !folder.isEmpty, FileManager.default.fileExists(atPath: folder) { localHome = folder }
         let serverStart = initialPath ?? c.initialRemotePath ?? home
         let rules = FileSystemFactory.rules(for: c)
