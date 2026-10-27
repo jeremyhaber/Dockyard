@@ -12,10 +12,8 @@ struct SettingsView: View {
         Form {
             Section("Transfers") {
                 Stepper(value: $maxConnections, in: AppSettings.globalMaxRange) {
-                    LabeledContent("Maximum connections", value: "\(maxConnections)")
+                    LabeledContent("Maximum connections across all sites", value: "\(maxConnections)")
                 }
-                Text("Transfers running at once across all sites. Each site has its own limit too.")
-                    .font(.caption).foregroundStyle(Palette.textSecondary)
             }
             Section("Logging") {
                 Toggle("Write a log file for each connection", isOn: $writeLogFiles)
@@ -25,11 +23,10 @@ struct SettingsView: View {
             Section("Local folder") {
                 HStack {
                     TextField("Default folder", text: $localFolder, prompt: Text("Your home folder"))
+                        .help("Used when a connection has no local folder and no session to restore")
                     Button("Choose\u{2026}") { chooseFolder() }
                     if !localFolder.isEmpty { Button("Clear") { localFolder = "" } }
                 }
-                Text("Used when a connection has no local folder and no session to restore.")
-                    .font(.caption).foregroundStyle(Palette.textSecondary)
             }
             Section("Finder") {
                 Stepper(value: $pollSeconds, in: 5...3600, step: 5) {
