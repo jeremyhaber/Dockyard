@@ -8,3 +8,6 @@ build/
 *.ipa
 *.dSYM.zip
 *.dSYM
+
+# Claude Code agent worktrees
+.claude/worktrees/
