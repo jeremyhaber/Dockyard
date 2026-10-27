@@ -73,6 +73,7 @@ struct ImportPreviewSheet: View {
                     ? "macOS may ask you to allow Dockyard to use each item. Passwords it cannot read are asked for on first connect."
                     : "Every imported connection asks for its password on first connect.")
                     .font(.caption).foregroundStyle(Palette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
             } else {
                 Text("Importing again updates the connections created by an earlier import and keeps the host and port you edited.")
                     .font(.caption).foregroundStyle(Palette.textSecondary)

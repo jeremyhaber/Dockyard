@@ -15,6 +15,7 @@ struct SettingsView: View {
                     LabeledContent("Maximum connections across all sites", value: "\(maxConnections)")
                 }
             }
+            MacSettingsSections()
             Section("Logging") {
                 Toggle("Write a log file for each connection", isOn: $writeLogFiles)
                 Text("Kept in ~/Library/Logs/Dockyard. Applies to connections opened from now on.")
@@ -40,7 +41,6 @@ struct SettingsView: View {
                     LabeledContent("Sync accounts every", value: "\(whmHours) hour\(whmHours == 1 ? "" : "s")")
                 }
             }
-            MacSettingsSections()
         }
         .formStyle(.grouped)
         .frame(width: 520, height: 680)
