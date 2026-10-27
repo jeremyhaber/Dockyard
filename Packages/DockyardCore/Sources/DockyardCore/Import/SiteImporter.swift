@@ -35,6 +35,12 @@ public struct ImportedSite: Sendable, Equatable {
     public var notes: String = ""
     public var tags: [String] = []
     public var keychain: KeychainPasswordRequest?
+    public var agentSocket: AgentSocket = .system
+    /// Secret references per purpose. Stored on the connection, or resolved and copied to the Keychain when `copyReferencesToKeychain` is set.
+    public var secretReferences: [SecretPurpose: String] = [:]
+    public var copyReferencesToKeychain = false
+    /// Set by the 1Password import: lets a re-import find and update the connection it created.
+    public var onePasswordItemId: String?
 
     public var clientFolderName: String? { folderPath.isEmpty ? nil : folderPath.joined(separator: " / ") }
 }
@@ -54,6 +60,10 @@ public struct ImportSummary: Sendable, Equatable {
     public var skippedDuplicates = 0
     public var foldersCreated = 0
     public var passwordsStored = 0
+    /// Connections that now take a secret from a reference.
+    public var referencesStored = 0
+    /// Existing connections refreshed from a re-import.
+    public var updated = 0
     /// Connections that ask for a password on first connect.
     public var needingPassword = 0
     public var warnings: [String] = []
@@ -80,12 +90,20 @@ public struct SiteImporter: Sendable {
         self.clock = clock
     }
 
-    public func apply(_ parsed: ImportParseResult, passwordReader: (any ImportedPasswordReader)? = nil) async throws -> ImportSummary {
+    /// - Parameter referenceResolver: needed only for sites with `copyReferencesToKeychain`.
+    public func apply(
+        _ parsed: ImportParseResult, passwordReader: (any ImportedPasswordReader)? = nil,
+        referenceResolver: (any SecretReferenceResolving)? = nil
+    ) async throws -> ImportSummary {
         var summary = ImportSummary(warnings: parsed.warnings)
         let existingFolders = Set(try await folders.all().map { $0.name.lowercased() })
         var folderIds: [String: UUID] = [:]
 
         for site in parsed.sites {
+            if let itemId = site.onePasswordItemId, let existing = try await repository.connection(onePasswordItemId: itemId, source: source) {
+                try await update(existing, from: site, resolver: referenceResolver, summary: &summary)
+                continue
+            }
             if try await repository.connection(protocol: site.protocol, host: site.host, port: site.port, username: site.username) != nil {
                 summary.skippedDuplicates += 1
                 continue
@@ -99,12 +117,15 @@ public struct SiteImporter: Sendable {
                     if !existingFolders.contains(name.lowercased()) { summary.foldersCreated += 1 }
                 }
             }
-            let connection = Connection(
+            var connection = Connection(
                 name: site.name, clientFolderId: folderId, protocol: site.protocol, host: site.host, port: site.port,
                 username: site.username, authMethods: site.authMethods, keyPath: site.keyPath, tags: site.tags,
-                notes: site.notes, source: source, createdAt: clock.now(), initialRemotePath: site.remotePath)
+                notes: site.notes, source: source, createdAt: clock.now(), initialRemotePath: site.remotePath,
+                agentSocket: site.agentSocket, onePasswordItemId: site.onePasswordItemId)
+            let handled = try await storeSecrets(of: site, for: &connection, resolver: referenceResolver, summary: &summary)
             try await repository.save(connection)
             summary.created += 1
+            if handled.contains(.password) { continue }
 
             guard site.authMethods.contains(.password), let request = site.keychain else {
                 if site.authMethods.contains(.password), site.username != "anonymous" { summary.needingPassword += 1 }
@@ -119,5 +140,56 @@ public struct SiteImporter: Sendable {
             }
         }
         return summary
+    }
+
+    /// Refreshes what the other app owns and leaves what the user edited: name, notes, host and port follow
+    /// `userEditedFields`; folder, favourites and other settings are never touched.
+    private func update(
+        _ existing: Connection, from site: ImportedSite, resolver: (any SecretReferenceResolving)?, summary: inout ImportSummary
+    ) async throws {
+        var connection = existing
+        if !existing.userEditedFields.contains(.name) { connection.name = site.name }
+        if !existing.userEditedFields.contains(.host) { connection.host = site.host }
+        if !existing.userEditedFields.contains(.port) { connection.port = site.port }
+        connection.protocol = site.protocol
+        connection.username = site.username
+        connection.authMethods = site.authMethods
+        connection.agentSocket = site.agentSocket
+        connection.tags += site.tags.filter { !connection.tags.contains($0) }
+        connection.removedFromSource = false
+        _ = try await storeSecrets(of: site, for: &connection, resolver: resolver, summary: &summary)
+        try await repository.save(connection)
+        summary.updated += 1
+    }
+
+    /// Puts the site's secret references on `connection`, or copies the secrets they point at into the Keychain.
+    /// Returns the purposes that now have a secret source.
+    private func storeSecrets(
+        of site: ImportedSite, for connection: inout Connection, resolver: (any SecretReferenceResolving)?, summary: inout ImportSummary
+    ) async throws -> Set<SecretPurpose> {
+        guard !site.secretReferences.isEmpty else { return [] }
+        guard site.copyReferencesToKeychain else {
+            connection.secretReferences.merge(site.secretReferences) { _, new in new }
+            summary.referencesStored += 1
+            return Set(site.secretReferences.keys)
+        }
+        var handled: Set<SecretPurpose> = []
+        for (purpose, reference) in site.secretReferences {
+            guard let resolver, let secrets else {
+                summary.warnings.append("\(site.name): cannot copy a secret out of 1Password without a resolver")
+                continue
+            }
+            do {
+                try await secrets.setSecret(try await resolver.resolve(reference: reference), for: connection.id, purpose: purpose)
+                connection.secretReferences[purpose] = nil
+                handled.insert(purpose)
+                if purpose == .password { summary.passwordsStored += 1 }
+            } catch let error as OnePasswordError where error.needsUserAction {
+                throw error
+            } catch {
+                summary.warnings.append("\(site.name): could not read the \(purpose.rawValue) from 1Password")
+            }
+        }
+        return handled
     }
 }

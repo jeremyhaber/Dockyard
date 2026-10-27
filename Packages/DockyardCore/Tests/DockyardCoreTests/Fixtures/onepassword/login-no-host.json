@@ -1,0 +1,27 @@
+{
+  "id": "a1b2c3d4e5f6g7h8i9j0k1l2m3",
+  "title": "Notes login",
+  "version": 1,
+  "vault": {
+    "id": "p9a2c4e6g8i0k2m4o6q8s0u2wy",
+    "name": "Clients"
+  },
+  "category": "LOGIN",
+  "tags": [],
+  "fields": [
+    {
+      "id": "username",
+      "type": "STRING",
+      "purpose": "USERNAME",
+      "label": "username",
+      "value": "me@example.com"
+    },
+    {
+      "id": "password",
+      "type": "CONCEALED",
+      "purpose": "PASSWORD",
+      "label": "password",
+      "value": "pw-nf"
+    }
+  ]
+}

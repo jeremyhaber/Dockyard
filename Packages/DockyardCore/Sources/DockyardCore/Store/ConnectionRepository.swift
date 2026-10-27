@@ -173,6 +173,15 @@ public final class ConnectionRepository: Sendable {
         }
     }
 
+    /// The connection a previous 1Password import created from this item.
+    public func connection(onePasswordItemId itemId: String, source: ConnectionSource = .onePasswordImport) async throws -> Connection? {
+        try await db.writer.read { db in
+            try Connection.fetchOne(
+                db, sql: "SELECT * FROM connection WHERE onePasswordItemId = ? AND source = ? ORDER BY createdAt LIMIT 1",
+                arguments: [itemId, source.rawValue])
+        }
+    }
+
     public func fetch(_ filter: ConnectionFilter = .all) async throws -> [Connection] {
         let (sql, args) = query(for: filter)
         return try await db.writer.read { try Connection.fetchAll($0, sql: sql, arguments: args) }

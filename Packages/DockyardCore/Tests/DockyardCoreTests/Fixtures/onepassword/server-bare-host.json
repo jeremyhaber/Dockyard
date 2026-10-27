@@ -1,0 +1,43 @@
+{
+  "id": "d3w9r2p6fh4k8c5nb7sj1gq0ty",
+  "title": "Globex staging",
+  "version": 1,
+  "vault": {
+    "id": "bq3d6fz7yzvsr5lk4rpxu2h6im",
+    "name": "Infrastructure"
+  },
+  "category": "SERVER",
+  "tags": [],
+  "fields": [
+    {
+      "id": "url",
+      "type": "URL",
+      "label": "URL",
+      "value": "staging.globex.example",
+      "reference": "op://Infrastructure/Globex staging/url"
+    },
+    {
+      "id": "username",
+      "type": "STRING",
+      "purpose": "USERNAME",
+      "label": "username",
+      "value": "ops",
+      "reference": "op://Infrastructure/Globex staging/username"
+    },
+    {
+      "id": "password",
+      "type": "CONCEALED",
+      "purpose": "PASSWORD",
+      "label": "password",
+      "value": "s3cret-pw",
+      "reference": "op://Infrastructure/Globex staging/password"
+    },
+    {
+      "id": "port",
+      "type": "STRING",
+      "label": "port",
+      "value": "2200",
+      "reference": "op://Infrastructure/Globex staging/port"
+    }
+  ]
+}
