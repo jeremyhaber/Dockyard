@@ -69,6 +69,7 @@ final class ScriptedShellFileSystem: ShellFakeFileSystem, RemoteCommandRunner, @
         let result = try await exec(command)
         return AsyncThrowingStream { continuation in
             if !result.stdout.isEmpty { continuation.yield(.stdout(result.stdout)) }
+            if !result.stderr.isEmpty { continuation.yield(.stderr(result.stderr)) }
             continuation.yield(.exit(result.exitStatus))
             continuation.finish()
         }
