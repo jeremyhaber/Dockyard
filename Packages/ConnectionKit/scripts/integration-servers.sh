@@ -15,6 +15,7 @@ SSH_KBD_PORT=2224    # keyboard-interactive only
 SSH_SLOW_PORT=2225   # proxy to 2222 adding 40 ms round trip (scripts/latency-proxy.py)
 FTP_PORT=2121        # pure-ftpd: MLSD, explicit TLS, EPSV
 FTP_LIST_PORT=2122   # vsftpd: no MLSD, exercises the LIST fallback
+FTP_LIMITED_PORT=2123 # pure-ftpd allowing 2 connections per client: exercises the queue's back-off
 USER_NAME=dockyard
 USER_PASS=dockyard-test-pw
 KEY_PASSPHRASE=dockyard-key-pw
@@ -29,7 +30,7 @@ VSFTPD_IMAGE=fauria/vsftpd:latest
 NET_INNER=dockyard-test-inner1
 NET_DEEP=dockyard-test-inner2
 
-containers=(dockyard-test-sftp dockyard-test-ftp dockyard-test-vsftpd dockyard-test-inner dockyard-test-deep)
+containers=(dockyard-test-sftp dockyard-test-ftp dockyard-test-vsftpd dockyard-test-ftp-limited dockyard-test-inner dockyard-test-deep)
 
 up() {
   docker build --network host -q -t "$SSH_IMAGE" -f "$PKG_DIR/scripts/Dockerfile.sshd" "$PKG_DIR/scripts" >/dev/null
@@ -79,6 +80,11 @@ up() {
     -e ADDED_FLAGS="--tls=1" "$FTP_IMAGE" \
     /run.sh -c 5 -C 5 -l puredb:/etc/pure-ftpd/pureftpd.pdb -E -j >/dev/null  # image default minus -R, which blocks chmod
 
+  docker run -d --name dockyard-test-ftp-limited -p "127.0.0.1:$FTP_LIMITED_PORT:21" -p 127.0.0.1:30200-30209:30200-30209 \
+    -e PUBLICHOST=127.0.0.1 -e FTP_USER_NAME="$USER_NAME" -e FTP_USER_PASS="$USER_PASS" \
+    -e FTP_USER_HOME=/home/dockyard -e FTP_PASSIVE_PORTS=30200:30209 \
+    "$FTP_IMAGE" /run.sh -c 2 -C 2 -l puredb:/etc/pure-ftpd/pureftpd.pdb -E -j >/dev/null
+
   docker run -d --name dockyard-test-vsftpd -p "127.0.0.1:$FTP_LIST_PORT:21" -p 127.0.0.1:30100-30109:30100-30109 \
     -e FTP_USER="$USER_NAME" -e FTP_PASS="$USER_PASS" -e PASV_ADDRESS=127.0.0.1 \
     -e PASV_MIN_PORT=30100 -e PASV_MAX_PORT=30109 -e LOG_STDOUT=1 "$VSFTPD_IMAGE" >/dev/null
@@ -93,6 +99,7 @@ up() {
   wait_for_container_ssh dockyard-test-deep
   wait_for_port "$FTP_PORT" FTP
   wait_for_port "$FTP_LIST_PORT" vsftpd
+  wait_for_port "$FTP_LIMITED_PORT" "pure-ftpd (limited)"
   echo "Servers are up. Run: DOCKYARD_INTEGRATION=1 swift test"
 }
 

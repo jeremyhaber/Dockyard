@@ -138,7 +138,7 @@ private func target(_ host: String, secrets: InMemorySecretStore) async -> Conne
         #expect(ShellQuote.quote("plain") == "'plain'")
         #expect(ShellQuote.quote("it's") == "'it'\\''s'")
         #expect(ShellQuote.quote("a b; rm -rf /") == "'a b; rm -rf /'")
-        #expect(ShellQuote.quote(["a", "b c"]) == "'a' 'b c'")
+        #expect(ShellQuote.join(["a", "b c"]) == "'a' 'b c'")
         #expect(ShellQuote.quote("") == "''")
     }
 }

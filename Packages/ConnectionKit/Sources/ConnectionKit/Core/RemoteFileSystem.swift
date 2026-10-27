@@ -13,6 +13,9 @@ public protocol RemoteFileSystem: Sendable {
     /// No-op where unsupported.
     func chmod(_ path: String, mode: UInt16) async throws
     func homeDirectory() async throws -> String
+    /// One entry, or nil when it does not exist. Backends should answer without listing the parent;
+    /// the default lists it.
+    func stat(_ path: String) async throws -> RemoteItem?
     func disconnect() async
     /// Each access returns a new subscription to this connection's log.
     var logStream: AsyncStream<LogLine> { get }

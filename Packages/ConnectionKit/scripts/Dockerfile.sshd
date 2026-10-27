@@ -1,6 +1,6 @@
 FROM ubuntu:24.04
 RUN apt-get update \
- && apt-get install -y --no-install-recommends openssh-server openssh-client openssh-sftp-server sudo passwd \
+ && apt-get install -y --no-install-recommends openssh-server openssh-client openssh-sftp-server sudo passwd zip unzip bzip2 xz-utils procps \
  && rm -rf /var/lib/apt/lists/* \
  && userdel -r ubuntu \
  && mkdir -p /run/sshd /etc/ssh/authorized_keys \
