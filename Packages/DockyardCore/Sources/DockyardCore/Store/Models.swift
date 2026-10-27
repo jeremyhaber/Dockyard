@@ -125,6 +125,14 @@ public struct Connection: Sendable, Hashable, Identifiable {
     /// Per-site skip patterns (gitignore style), on top of the global defaults.
     public var transferFilters: [String]
 
+    /// Most simultaneous connections the transfer queue may open to this site (1...10).
+    public var maxConnections: Int
+    /// Minimum pause between opening two connections to this site, for hosts that rate-limit logins.
+    public var connectDelayMs: Int
+
+    public static let defaultMaxConnections = 3
+    public static let maxConnectionsRange = 1...10
+
     public init(
         id: UUID = UUID(),
         name: String,
@@ -161,7 +169,9 @@ public struct Connection: Sendable, Hashable, Identifiable {
         verifyChecksums: Bool = false,
         jumpHost: UUID? = nil,
         pinnedFolders: [PinnedFolder] = [],
-        transferFilters: [String] = []
+        transferFilters: [String] = [],
+        maxConnections: Int = Connection.defaultMaxConnections,
+        connectDelayMs: Int = 0
     ) {
         self.id = id
         self.name = name
@@ -199,6 +209,8 @@ public struct Connection: Sendable, Hashable, Identifiable {
         self.jumpHost = jumpHost
         self.pinnedFolders = pinnedFolders
         self.transferFilters = transferFilters
+        self.maxConnections = min(max(maxConnections, Self.maxConnectionsRange.lowerBound), Self.maxConnectionsRange.upperBound)
+        self.connectDelayMs = max(0, connectDelayMs)
     }
 
     /// The `ConnectionKit` view of this connection.
@@ -273,7 +285,9 @@ extension Connection: FetchableRecord, PersistableRecord, TableRecord {
             verifyChecksums: row["verifyChecksums"],
             jumpHost: (row["jumpHost"] as String?).flatMap { UUID(uuidString: $0) },
             pinnedFolders: Self.decodeJSON(row["pinnedFolders"], default: []),
-            transferFilters: Self.decodeJSON(row["transferFilters"], default: [])
+            transferFilters: Self.decodeJSON(row["transferFilters"], default: []),
+            maxConnections: row["maxConnections"],
+            connectDelayMs: row["connectDelayMs"]
         )
     }
 
@@ -326,6 +340,8 @@ extension Connection: FetchableRecord, PersistableRecord, TableRecord {
         container["jumpHost"] = jumpHost?.uuidString
         container["pinnedFolders"] = String(decoding: try JSONEncoder().encode(pinnedFolders), as: UTF8.self)
         container["transferFilters"] = String(decoding: try JSONEncoder().encode(transferFilters), as: UTF8.self)
+        container["maxConnections"] = maxConnections
+        container["connectDelayMs"] = connectDelayMs
     }
 
     private static func decodeJSON<T: Decodable>(_ text: String, default fallback: T) -> T {
