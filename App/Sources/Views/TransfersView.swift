@@ -43,7 +43,7 @@ struct TransfersHeader: View {
             row(iconOnly: false)
             row(iconOnly: true)
         }
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func row(iconOnly: Bool) -> some View {
@@ -57,7 +57,7 @@ struct TransfersHeader: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .frame(width: 340)
+            .fixedSize()
             .onChange(of: center.tab) { center.folder = nil }
             if let folder = center.folder {
                 Button {
