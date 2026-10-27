@@ -70,5 +70,5 @@ struct RenameFailingFileSystem: RemoteFileSystem, RemoteCommandRunner {
     func delete(_ path: String, recursive: Bool) async throws { try await inner.delete(path, recursive: recursive) }
     func chmod(_ path: String, mode: UInt16) async throws { try await inner.chmod(path, mode: mode) }
     func exec(_ command: String) async throws -> SSHExecResult { try await inner.exec(command) }
-    func execStream(_ command: String) async throws -> AsyncThrowingStream<SSHExecEvent, Error> { try await inner.execStream(command) }
+    func execStream(_ command: String, elevated: Bool) async throws -> AsyncThrowingStream<SSHExecEvent, Error> { try await inner.execStream(command, elevated: elevated) }
 }

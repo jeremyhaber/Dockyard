@@ -134,11 +134,20 @@ public actor SFTPFileSystem: RemoteFileSystem, RemoteCommandRunner {
         return try await ssh.exec(command)
     }
 
-    public func execStream(_ command: String) async throws -> AsyncThrowingStream<SSHExecEvent, Error> {
+    /// Runs a command and streams its output and exit status. With `elevated` and an `su`/`sudo` setting it
+    /// runs as root (`canElevateCommands` says whether the file browser is root too). Cancelling the
+    /// consuming task (or dropping the stream) kills the remote process group.
+    public func execStream(_ command: String, elevated: Bool) async throws -> AsyncThrowingStream<SSHExecEvent, Error> {
         guard let ssh else { throw RemoteError.notConnected }
-        hub.emit(.command, command)
-        return try await ssh.execStream(command)
+        var elevation: ShellElevation?
+        if elevated, config.elevation != .none {
+            elevation = ShellElevation(kind: config.elevation, password: try await secrets.secret(for: config.id, purpose: .elevationPassword))
+        }
+        hub.emit(.command, elevation == nil ? command : "[\(config.elevation == .su ? "su" : "sudo")] \(command)")
+        return ssh.execStream(command, elevation: elevation)
     }
+
+    public var canElevateCommands: Bool { isBrowsingAsRoot }
 
     // MARK: Listing
 

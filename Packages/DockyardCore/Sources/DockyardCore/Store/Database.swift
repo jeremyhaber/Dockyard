@@ -128,6 +128,44 @@ public final class DockyardDatabase: Sendable {
             }
         }
         migrator.registerPhase5SafetyMigration()
+        migrator.registerMigration("v3-transfer-queue") { db in
+            try db.alter(table: "connection") { t in
+                t.add(column: "maxConnections", .integer).notNull().defaults(to: Connection.defaultMaxConnections)
+                t.add(column: "connectDelayMs", .integer).notNull().defaults(to: 0)
+            }
+            try db.create(table: "transferJob") { t in
+                t.primaryKey("id", .integer)
+                t.column("parentId", .integer)
+                t.column("rootId", .integer).notNull()
+                t.column("siteKey", .text).notNull()
+                t.column("srcSite", .text)
+                t.column("dstSite", .text)
+                t.column("srcLabel", .text).notNull()
+                t.column("dstLabel", .text).notNull()
+                t.column("sourcePath", .text).notNull()
+                t.column("destPath", .text).notNull()
+                t.column("isDirectory", .boolean).notNull()
+                t.column("size", .integer)
+                t.column("modified", .double)
+                t.column("createParents", .boolean).notNull()
+                t.column("recursive", .boolean).notNull()
+                t.column("deleteSource", .boolean).notNull()
+                t.column("conflict", .integer)
+                t.column("state", .integer).notNull()
+                t.column("bytesDone", .integer).notNull().defaults(to: 0)
+                t.column("bytesTotal", .integer).notNull().defaults(to: 0)
+                t.column("error", .text)
+                t.column("expanded", .boolean).notNull().defaults(to: false)
+                t.column("childCount", .integer).notNull().defaults(to: 0)
+                t.column("childrenDone", .integer).notNull().defaults(to: 0)
+                t.column("resume", .boolean).notNull().defaults(to: false)
+                t.column("attempts", .integer).notNull().defaults(to: 0)
+            }
+            try db.create(index: "transferJob_on_lane", on: "transferJob", columns: ["siteKey", "isDirectory", "state", "id"])
+            try db.create(index: "transferJob_on_state", on: "transferJob", columns: ["state", "id"])
+            try db.create(index: "transferJob_on_parent", on: "transferJob", columns: ["parentId", "id"])
+            try db.create(index: "transferJob_on_root", on: "transferJob", columns: ["rootId"])
+        }
         registerJournalMigration(&migrator)
         return migrator
     }

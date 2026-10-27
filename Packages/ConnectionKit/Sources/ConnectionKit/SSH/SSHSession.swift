@@ -26,6 +26,7 @@ public final class SSHSession: @unchecked Sendable {
     private var pumpScheduled = false
     private var keepAliveTimer: DispatchSourceTimer?
     private(set) var isAlive = false
+    private var lastFailureCode: Int32 = 0
 
     private init(options: SSHSessionOptions, log: @escaping @Sendable (LogLine.Kind, String) -> Void) {
         self.options = options
@@ -67,9 +68,10 @@ public final class SSHSession: @unchecked Sendable {
                 }
             }
         } catch {
+            let refusal = try? await session.perform(requireAlive: false) { $0.refusal(for: error) }
             session.upstream = nil
             await session.close()
-            throw error
+            throw refusal ?? error
         }
         log(.status, "Host key \(hostKey.algorithm) \(hostKey.fingerprint)")
         guard await validator.validate(hostKey) else {
@@ -135,6 +137,12 @@ public final class SSHSession: @unchecked Sendable {
 
     /// Tries `steps` in order on this connection until the server reports success.
     public func authenticate(username: String, steps: [SSHAuthStep]) async throws {
+        do { try await authenticateSteps(username: username, steps: steps) } catch {
+            throw (try? await perform(requireAlive: false) { $0.refusal(for: error) }) ?? error
+        }
+    }
+
+    private func authenticateSteps(username: String, steps: [SSHAuthStep]) async throws {
         let log = self.log
         try await perform { session in
             guard let handle = session.handle else { throw RemoteError.notConnected }
@@ -329,40 +337,6 @@ public final class SSHSession: @unchecked Sendable {
         }
     }
 
-    /// Runs a command and streams its output. Cancelling the consuming task (or dropping the stream)
-    /// closes the channel; the remote process is only signalled if it writes afterwards, so callers that
-    /// must stop it promptly kill it by pid (see `RemoteSearch`).
-    public func execStream(_ command: String) async throws -> AsyncThrowingStream<SSHExecEvent, Error> {
-        let channel = try await perform { session in
-            let channel = try session.newChannel()
-            try channel.exec(command)
-            return channel
-        }
-        let (stream, continuation) = AsyncThrowingStream<SSHExecEvent, Error>.makeStream()
-        let task = Task { [self] in
-            do {
-                while !Task.isCancelled {
-                    let chunk = try await perform { _ in try channel.readSome(wait: 0.1) }
-                    if !chunk.stdout.isEmpty { continuation.yield(.stdout(chunk.stdout)) }
-                    if !chunk.stderr.isEmpty { continuation.yield(.stderr(chunk.stderr)) }
-                    if chunk.isEOF {
-                        let status = try await perform { _ in try channel.closeAndExitStatus() }
-                        continuation.yield(.exit(status))
-                        continuation.finish()
-                        return
-                    }
-                }
-                try? await perform { _ in channel.close() }
-                continuation.finish()
-            } catch {
-                try? await perform { _ in channel.close() }
-                continuation.finish(throwing: error)
-            }
-        }
-        continuation.onTermination = { _ in task.cancel() }
-        return stream
-    }
-
     /// Opens an interactive PTY shell on this connection. With `elevation`, `su -` or `sudo -i` is typed
     /// and its password prompt answered without showing the password.
     public func openShell(cols: Int, rows: Int, elevation: ShellElevation? = nil) async throws -> ShellChannel {
@@ -499,7 +473,17 @@ public final class SSHSession: @unchecked Sendable {
          LIBSSH2_ERROR_KEX_FAILURE, LIBSSH2_ERROR_TIMEOUT].contains(code)
     }
 
+    /// A server that drops us while connecting or logging in is limiting connections (sshd `MaxStartups`,
+    /// fail2ban, per-IP limits), which is a refusal rather than a broken session.
+    func refusal(for error: Error) -> RemoteError? {
+        guard case RemoteError.protocolError(let message) = error else { return nil }
+        let codes = [LIBSSH2_ERROR_SOCKET_DISCONNECT, LIBSSH2_ERROR_BANNER_RECV, LIBSSH2_ERROR_SOCKET_RECV, LIBSSH2_ERROR_KEX_FAILURE]
+        guard codes.contains(lastFailureCode) || RemoteError.looksLikeConnectionLimit(message) else { return nil }
+        return .connectionRefused(message)
+    }
+
     func failure(_ what: String, _ code: Int32) -> RemoteError {
+        lastFailureCode = code
         var message: UnsafeMutablePointer<CChar>?
         var length: Int32 = 0
         if let handle { _ = libssh2_session_last_error(handle, &message, &length, 0) }

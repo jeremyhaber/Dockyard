@@ -3,13 +3,18 @@ import ConnectionKit
 
 /// One side of a transfer: a file system and the name to show for it in route labels.
 public struct TransferEndpoint: Sendable {
+    /// The caller's own session. Used directly only when the queue has no `TransferSite` for `siteId`.
     public let fs: any RemoteFileSystem
     /// e.g. `PROD`, `STG`, `This Mac`.
     public let label: String
+    /// Identifies the saved connection. With a `TransferSite` registered for it, the queue opens its own
+    /// pooled sessions (limits, back-off, persistence across restarts) instead of using `fs`.
+    public let siteId: UUID?
 
-    public init(fs: any RemoteFileSystem, label: String) {
+    public init(fs: any RemoteFileSystem, label: String, siteId: UUID? = nil) {
         self.fs = fs
         self.label = label
+        self.siteId = siteId
     }
 
     public static func thisMac(_ fs: LocalFileSystem = LocalFileSystem()) -> TransferEndpoint {
@@ -17,6 +22,39 @@ public struct TransferEndpoint: Sendable {
     }
 
     public var isLocal: Bool { fs is LocalFileSystem }
+}
+
+/// A server the queue may open connections to. Register it with `TransferQueue.register(site:)`.
+public struct TransferSite: Sendable {
+    public var id: UUID
+    public var label: String
+    /// Upper bound for simultaneous connections (the site's setting, 1...10).
+    public var maxConnections: Int
+    /// Minimum time between opening two connections.
+    public var connectDelayMs: Int
+    /// Creates a new, not yet connected session. The queue connects it and closes it when idle.
+    public var makeSession: @Sendable () async throws -> any RemoteFileSystem
+
+    public init(
+        id: UUID, label: String, maxConnections: Int = Connection.defaultMaxConnections, connectDelayMs: Int = 0,
+        makeSession: @escaping @Sendable () async throws -> any RemoteFileSystem
+    ) {
+        self.id = id
+        self.label = label
+        self.maxConnections = min(max(1, maxConnections), 10)
+        self.connectDelayMs = max(0, connectDelayMs)
+        self.makeSession = makeSession
+    }
+
+    public init(connection: Connection, makeSession: @escaping @Sendable () async throws -> any RemoteFileSystem) {
+        self.init(id: connection.id, label: connection.name, maxConnections: connection.maxConnections,
+                  connectDelayMs: connection.connectDelayMs, makeSession: makeSession)
+    }
+
+    /// The endpoint to put in a `TransferRequest`. `fs` is only a fallback; see `TransferEndpoint.siteId`.
+    public func endpoint(fs: any RemoteFileSystem) -> TransferEndpoint {
+        TransferEndpoint(fs: fs, label: label, siteId: id)
+    }
 }
 
 public struct TransferRequest: Sendable {
@@ -105,7 +143,7 @@ public struct TransferJobInfo: Sendable, Equatable, Identifiable {
     public var bytesDone: UInt64
     public var bytesTotal: UInt64
     public var error: String?
-    /// Folder jobs: number of file/folder children created by expansion and how many are done.
+    /// Folder jobs: number of direct children created by the listing and how many of them are finished.
     public var childCount: Int
     public var finishedChildCount: Int
     /// The next run will resume a partial file.
@@ -118,26 +156,3 @@ public struct TransferJobInfo: Sendable, Equatable, Identifiable {
     }
 }
 
-public struct TransferSnapshot: Sendable, Equatable {
-    /// Top-level jobs, in the order they were added. Folder jobs carry aggregated progress.
-    public var jobs: [TransferJobInfo]
-    /// File-level counts across all jobs (folder jobs themselves are not counted).
-    public var activeCount: Int
-    public var queuedCount: Int
-    public var completedCount: Int
-    public var failedCount: Int
-    public var skippedCount: Int
-    public var bytesDone: UInt64
-    public var bytesTotal: UInt64
-    /// Route of the oldest running transfer, e.g. `PROD → STG`.
-    public var currentRoute: String?
-    public var currentIsRelay: Bool
-    public var currentName: String?
-
-    public var isIdle: Bool { activeCount == 0 && queuedCount == 0 }
-    public var fraction: Double? { bytesTotal > 0 ? min(1, Double(bytesDone) / Double(bytesTotal)) : nil }
-
-    public static let empty = TransferSnapshot(
-        jobs: [], activeCount: 0, queuedCount: 0, completedCount: 0, failedCount: 0, skippedCount: 0,
-        bytesDone: 0, bytesTotal: 0, currentRoute: nil, currentIsRelay: false, currentName: nil)
-}

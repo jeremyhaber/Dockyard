@@ -189,9 +189,10 @@ private struct ShellSearch {
 
     // MARK: Commands
 
-    /// `sh -c 'echo $$; exec "$@"'` prints the pid first so the process can be killed on cancel.
+    /// `sh -c 'echo $$; exec "$@"'` prints a pid line first, which tells us the server really ran the shell.
+    /// Stopping early needs no kill: dropping the stream kills the remote process group.
     private func wrap(_ arguments: [String]) -> String {
-        "sh -c 'echo $$; exec \"$@\"' sh " + ShellQuote.quote(arguments)
+        "sh -c 'echo $$; exec \"$@\"' sh " + ShellQuote.join(arguments)
     }
 
     private var root: String { query.root.hasPrefix("-") ? "./" + query.root : query.root }
@@ -264,7 +265,6 @@ private struct ShellSearch {
 
         if attempt.truncated || Task.isCancelled {
             attempt.cancelled = Task.isCancelled && !attempt.truncated
-            await kill(pid)
         }
         return attempt
     }
@@ -281,11 +281,5 @@ private struct ShellSearch {
                 path: path, isDirectory: fields[0] == "d", size: UInt64(fields[1]),
                 modified: Double(fields[2]).map { Date(timeIntervalSince1970: $0) })
         }
-    }
-
-    /// Stops the remote process and any children (for example the greps that `find -exec` would start).
-    private func kill(_ pid: Int?) async {
-        guard let pid else { return }
-        _ = try? await runner.exec("pkill -TERM -P \(pid) 2>/dev/null; kill -TERM \(pid) 2>/dev/null; true")
     }
 }
