@@ -83,11 +83,15 @@ final class AppModel {
     private init() {
         var startup: String?
         let db: DockyardDatabase
+        let demo = DemoMode.isEnabled
         do {
+            if demo { throw AppError.cancelled }
             try FileManager.default.createDirectory(at: AppPaths.supportDirectory, withIntermediateDirectories: true)
             db = try DockyardDatabase(path: AppPaths.databaseURL.path)
         } catch {
-            startup = "Could not open the Dockyard database (\(error.userMessage)). Changes will not be saved this session."
+            if !demo {
+                startup = "Could not open the Dockyard database (\(error.userMessage)). Changes will not be saved this session."
+            }
             // An in-memory database cannot fail to open.
             db = (try? DockyardDatabase()) ?? { fatalError("in-memory database unavailable") }()
         }
@@ -108,10 +112,14 @@ final class AppModel {
         self.sessionService = SessionService(repository: sessionRepo, saver: SessionSaver(repository: sessionRepo))
         self.whmSync = WHMSyncService(repository: repo, sources: sources, secrets: secrets)
         self.prompts = prompts
-        self.queue = TransferQueue(conflictPolicy: .ask, resolver: { info in await prompts.askConflict(info) })
+        self.queue = TransferQueue(maxConcurrent: demo ? 1 : 3, conflictPolicy: .ask, resolver: { info in await prompts.askConflict(info) })
         self.startupError = startup
         startObserving()
-        startWHMScheduler()
+        if demo {
+            Task { await DemoSeeder.run(self) }
+        } else {
+            startWHMScheduler()
+        }
     }
 
     // MARK: Derived
@@ -383,6 +391,7 @@ final class AppModel {
     // MARK: Credentials and host keys
 
     private func ensureCredentials(for session: ConnectionSession, forcePrompt: Bool) async throws {
+        if DemoMode.isEnabled { return }
         let c = session.connection
         let log = session.log
         switch c.protocol {

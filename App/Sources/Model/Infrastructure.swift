@@ -44,16 +44,18 @@ extension Error {
 
 enum FileSystemFactory {
     static func secretStore() -> any SecretStore {
+        if DemoMode.isEnabled { return InMemorySecretStore() }
         #if canImport(Security)
-        KeychainSecretStore(useDataProtectionKeychain: false)
+        return KeychainSecretStore(useDataProtectionKeychain: false)
         #else
-        InMemorySecretStore()
+        return InMemorySecretStore()
         #endif
     }
 
     static func make(
         for connection: Connection, secrets: any SecretStore, hostKeyValidator: SSHHostKeyValidator
     ) throws -> any RemoteFileSystem {
+        if DemoMode.isEnabled { return DemoFileSystem(kind: .server) }
         switch connection.protocol {
         case .sftp:
             return SFTPFileSystem(config: connection.config, secrets: secrets, hostKeyValidator: hostKeyValidator)

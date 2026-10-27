@@ -29,7 +29,7 @@ final class ConnectionSession: Identifiable {
     let id = UUID()
     private(set) var connection: Connection
     let log: LogBuffer
-    let localFS = LocalFileSystem()
+    let localFS: any RemoteFileSystem = DemoMode.isEnabled ? DemoFileSystem(kind: .local) : LocalFileSystem()
 
     private(set) var status: SessionStatus = .connecting
     private(set) var fs: (any RemoteFileSystem)?
@@ -52,7 +52,7 @@ final class ConnectionSession: Identifiable {
         let writer = RollingLogFileWriter(
             directory: AppPaths.logsDirectory,
             name: "\(name.isEmpty ? "connection" : name)-\(connection.id.uuidString.prefix(8))")
-        self.log = LogBuffer(fileWriter: writer)
+        self.log = LogBuffer(fileWriter: DemoMode.isEnabled ? nil : writer)
         self.logCounts = log.counts
         followLog()
     }

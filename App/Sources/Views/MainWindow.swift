@@ -52,6 +52,9 @@ struct MainWindow: View {
             Text(app.activeSession?.operationError ?? "")
         }
         .frame(minWidth: 1020, minHeight: 600)
+        .task {
+            if DemoMode.isEnabled, DemoMode.screen == "connectionManager" { openWindow(id: "manager") }
+        }
     }
 
     private var subtitle: String {
