@@ -25,7 +25,11 @@ struct Toast: Identifiable, Equatable {
     var symbol = "checkmark.circle"
     var isError = false
     var undo: UndoTarget?
+    var link: ToastLink?
 }
+
+/// Where a toast's "View" button leads.
+enum ToastLink: Equatable { case failedTransfers }
 
 // MARK: - Root browsing
 
@@ -54,10 +58,12 @@ extension AppModel {
 extension AppModel {
     /// Pushes the Settings window's values to the running transfer queue and the WHM timer.
     func applySettings() {
+        let policy = AppSettings.conflictPolicy
+        let queue = self.queue
+        Task { await queue.setConflictPolicy(policy) }
         let limit = AppSettings.maxConnections
         if limit != lastAppliedMaxConnections {
             lastAppliedMaxConnections = limit
-            let queue = self.queue
             Task { await queue.setMaxConcurrent(limit) }
         }
         let interval = AppSettings.whmSyncInterval
@@ -150,11 +156,11 @@ extension AppModel {
 // MARK: - Toasts
 
 extension AppModel {
-    func showToast(_ text: String, symbol: String = "checkmark.circle", isError: Bool = false, undo: UndoTarget? = nil) {
-        let toast = Toast(text: text, symbol: symbol, isError: isError, undo: undo)
+    func showToast(_ text: String, symbol: String = "checkmark.circle", isError: Bool = false, undo: UndoTarget? = nil, link: ToastLink? = nil) {
+        let toast = Toast(text: text, symbol: symbol, isError: isError, undo: undo, link: link)
         toasts.append(toast)
         Task {
-            let seconds: UInt64 = DemoMode.isEnabled ? 120 : (undo == nil ? 4 : 9)
+            let seconds: UInt64 = DemoMode.isEnabled ? 120 : (undo == nil && link == nil ? 4 : 9)
             try? await Task.sleep(nanoseconds: seconds * 1_000_000_000)
             toasts.removeAll { $0.id == toast.id }
         }

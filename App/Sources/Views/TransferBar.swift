@@ -4,61 +4,36 @@ import SwiftUI
 
 struct TransferBar: View {
     @Environment(AppModel.self) private var app
-    @State private var showQueue = false
 
     var body: some View {
-        let snapshot = app.transfers
+        let s = app.transfers
         HStack(spacing: 12) {
-            if snapshot.isIdle {
-                Image(systemName: "arrow.up.arrow.down")
-                    .foregroundStyle(Palette.textSecondary)
-                Text(summaryWhenIdle(snapshot))
-                    .font(.system(size: 11))
-                    .foregroundStyle(Palette.textSecondary)
-            } else {
-                Image(systemName: snapshot.currentIsRelay ? "arrow.triangle.swap" : "arrow.up.arrow.down")
-                    .foregroundStyle(Color.accentColor)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(snapshot.currentName ?? "Preparing\u{2026}")
-                        .font(.system(size: 11, weight: .medium))
-                        .lineLimit(1)
-                    if let route = snapshot.currentRoute {
-                        Text(snapshot.currentIsRelay ? "\(route), relayed through this Mac" : route)
-                            .font(.system(size: 10))
-                            .foregroundStyle(Palette.textSecondary)
-                            .lineLimit(1)
-                    }
-                }
-                .frame(maxWidth: 240, alignment: .leading)
-                if let fraction = snapshot.fraction {
-                    ProgressView(value: fraction).frame(width: 160)
+            Image(systemName: s.isPaused ? "pause.circle" : "arrow.up.arrow.down")
+                .foregroundStyle(s.isIdle ? Palette.textSecondary : Color.accentColor)
+                .accessibilityHidden(true)
+            Text(summary(s))
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(s.isIdle ? Palette.textSecondary : Palette.textPrimary)
+                .lineLimit(1)
+            if s.failedCount > 0 { failedBadge(s.failedCount) }
+            if !s.isIdle {
+                if let fraction = s.fraction {
+                    ProgressView(value: fraction).frame(width: 150)
                 } else {
                     ProgressView().controlSize(.small)
                 }
-                Text(progressText(snapshot))
+                Text(progressText(s))
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(Palette.textSecondary)
-                if snapshot.queuedCount > 0 {
-                    Text("\(snapshot.queuedCount) queued")
-                        .font(.system(size: 11))
-                        .foregroundStyle(Palette.textSecondary)
-                }
+                    .lineLimit(1)
             }
-            Button {
-                showQueue.toggle()
-            } label: {
-                Label("Queue", systemImage: "list.bullet")
-                    .labelStyle(.titleAndIcon)
-            }
-            .controlSize(.small)
-            .popover(isPresented: $showQueue, arrowEdge: .top) { QueuePopover() }
-            .accessibilityLabel("Transfer queue")
-
+            skippedLabel(s)
             EditingIndicator()
             ArchiveIndicator()
 
-            Spacer()
+            Spacer(minLength: 8)
 
+            transfersButton
             logButton
             Button {
                 app.toggleDrawer(tab: .terminal)
@@ -72,6 +47,52 @@ struct TransferBar: View {
         .frame(height: 34)
         .background(Palette.chrome)
         .overlay(alignment: .top) { Divider() }
+        .contentShape(Rectangle())
+        .onTapGesture { app.showTransfers() }
+        .help("Show all transfers")
+    }
+
+    private func failedBadge(_ count: Int) -> some View {
+        Button {
+            app.showFailedTransfers()
+        } label: {
+            Text("\(count.formatted()) failed")
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 2)
+                .background(Color.red, in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .help("Show the failed transfers")
+        .accessibilityLabel("\(count) failed transfers. Show them")
+    }
+
+    @ViewBuilder
+    private func skippedLabel(_ s: TransferSnapshot) -> some View {
+        let skipped = s.filteredCount + s.skipReasons.values.reduce(0, +)
+        if skipped > 0 {
+            Text("\(skipped.formatted()) skipped")
+                .font(.system(size: 11))
+                .foregroundStyle(Palette.textSecondary)
+                .help(skipHelp(s))
+        }
+    }
+
+    private func skipHelp(_ s: TransferSnapshot) -> String {
+        var parts = SkipReason.allCases.compactMap { reason in s.skipReasons[reason].map { "\($0.formatted()) \(reason.title)" } }
+        if s.filteredCount > 0 { parts.append("\(s.filteredCount.formatted()) left out by filters") }
+        return parts.joined(separator: ", ")
+    }
+
+    private var transfersButton: some View {
+        Button {
+            app.toggleDrawer(tab: .transfers)
+        } label: {
+            Label("Transfers", systemImage: "list.bullet.rectangle")
+        }
+        .controlSize(.small)
+        .help("Toggle the transfers drawer")
     }
 
     private var logButton: some View {
@@ -103,15 +124,35 @@ struct TransferBar: View {
             .background(color, in: Capsule())
     }
 
-    private func summaryWhenIdle(_ s: TransferSnapshot) -> String {
-        if s.failedCount > 0 { return "No transfers running, \(s.failedCount) failed" }
-        if s.completedCount > 0 { return "\(s.completedCount) transfer\(s.completedCount == 1 ? "" : "s") completed" }
-        return "No transfers"
+    /// "3 active · 1,204 queued", or what is left when nothing runs.
+    private func summary(_ s: TransferSnapshot) -> String {
+        if s.isIdle {
+            if s.isPaused { return "Transfers paused" }
+            if s.completedCount > 0 { return "\(s.completedCount.formatted()) transfer\(s.completedCount == 1 ? "" : "s") done" }
+            return "No transfers"
+        }
+        var parts = ["\(s.activeCount.formatted()) active", "\(s.queuedCount.formatted()) queued"]
+        if s.isPaused { parts.insert("paused", at: 0) }
+        return parts.joined(separator: " \u{00B7} ")
     }
 
+    /// "1.2 GB of 3.4 GB \u{00B7} 24.8 MB/s \u{00B7} 2 min left"
     private func progressText(_ s: TransferSnapshot) -> String {
         guard s.bytesTotal > 0 else { return "" }
-        return "\(FileDisplay.size(s.bytesDone)) / \(FileDisplay.size(s.bytesTotal))"
+        var parts = ["\(FileDisplay.size(s.bytesDone)) of \(FileDisplay.size(s.bytesTotal))"]
+        let rate = app.transferRate
+        if rate > 0 {
+            parts.append("\(FileDisplay.size(UInt64(rate)))/s")
+            parts.append(Self.timeLeft(Double(s.bytesTotal - min(s.bytesDone, s.bytesTotal)) / rate))
+        }
+        return parts.joined(separator: " \u{00B7} ")
+    }
+
+    static func timeLeft(_ seconds: Double) -> String {
+        let s = Int(seconds.rounded(.up))
+        if s < 60 { return "\(max(s, 1)) sec left" }
+        if s < 3600 { return "\(s / 60) min left" }
+        return "\(s / 3600) h \((s % 3600) / 60) min left"
     }
 }
 

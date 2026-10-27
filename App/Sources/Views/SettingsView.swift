@@ -15,6 +15,7 @@ struct SettingsView: View {
                     LabeledContent("Maximum connections across all sites", value: "\(maxConnections)")
                 }
             }
+            TransferSettingsSections()
             Section("Logging") {
                 Toggle("Write a log file for each connection", isOn: $writeLogFiles)
                 Text("Kept in ~/Library/Logs/Dockyard. Applies to connections opened from now on.")
@@ -42,7 +43,7 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 520, height: 600)
+        .frame(width: 520, height: 760)
         .background(WindowAccessor { window in DemoWindows.register("settings", window) })
     }
 

@@ -6,7 +6,7 @@ import Observation
 import RcloneKit
 
 enum DrawerTab: String, Hashable {
-    case log, terminal
+    case log, terminal, transfers
 }
 
 /// The Quick Connect bar's protocol menu.
@@ -63,6 +63,7 @@ final class AppModel {
     let prompts: PromptCenter
     let edits = EditCenter()
     let archives = ArchiveCenter()
+    let transferUI = TransferCenter()
     let mounts = MountService()
     private(set) var startupError: String?
 
@@ -148,7 +149,7 @@ final class AppModel {
             }
         }
         self.queue = TransferQueue(
-            maxConcurrent: demo ? 1 : AppSettings.maxConnections, conflictPolicy: .ask, resolver: { info in await prompts.askConflict(info) },
+            maxConcurrent: demo ? 1 : AppSettings.maxConnections, conflictPolicy: AppSettings.conflictPolicy, resolver: { info in await prompts.askConflict(info) },
             database: db, siteProvider: siteProvider)
         self.startupError = startup
         siteHost.model = self
@@ -197,25 +198,17 @@ final class AppModel {
         Task { await queue.register(site: site) }
     }
 
-    /// Restored unfinished jobs start paused; ask before they hit the network.
+    /// Queued items from the last session start paused and failed ones stay listed; ask what to do with them once.
     private func offerToResumeTransfers() async {
-        let count = await queue.restoredJobCount
-        guard count > 0 else { return }
-        let alert = NSAlert()
-        alert.messageText = "Resume \(count) unfinished transfer\(count == 1 ? "" : "s")?"
-        alert.informativeText = "Dockyard was closed while transfers were still queued. They are paused until you resume them."
-        alert.addButton(withTitle: "Resume")
-        alert.addButton(withTitle: "Keep Paused")
-        alert.addButton(withTitle: "Discard")
-        switch alert.runModal() {
-        case .alertFirstButtonReturn:
-            await queue.resume()
-        case .alertThirdButtonReturn:
-            await queue.cancelAll()
-            await queue.removeFinished()
-        default:
-            break
+        let queued = await queue.restoredQueuedCount, failed = await queue.restoredFailedCount
+        guard queued + failed > 0 else { return }
+        var choice = AppSettings.leftoverChoice
+        if choice == .ask {
+            let answer = await prompts.askLeftovers(queued: queued, failed: failed)
+            choice = answer.choice
+            if answer.remember { UserDefaults.standard.set(choice.rawValue, forKey: AppSettings.launchLeftovers) }
         }
+        await applyLeftoverChoice(choice)
     }
 
     // MARK: Derived
@@ -287,6 +280,7 @@ final class AppModel {
 
     private func handle(_ snapshot: TransferSnapshot) {
         transfers = snapshot
+        trackTransferFailures(snapshot)
         journalCompletedTransfers(snapshot)
         let idle = snapshot.isIdle
         if idle && !wasIdle {

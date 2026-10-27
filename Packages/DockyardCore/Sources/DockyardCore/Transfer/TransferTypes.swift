@@ -40,15 +40,18 @@ public struct TransferSite: Sendable {
     public var beforeOverwrite: (@Sendable (_ path: String, _ fs: any RemoteFileSystem) async throws -> Void)?
     /// Compare SHA-256 of the local and remote copy after each upload or download; a mismatch fails the item.
     public var verifyChecksums: Bool
+    /// What to do about existing files on this site when nothing else decides (nil or `.ask` defers to the queue's policy).
+    public var defaultConflict: ConflictPolicy?
 
     public init(
         id: UUID, label: String, maxConnections: Int = Connection.defaultMaxConnections, connectDelayMs: Int = 0,
-        filter: TransferFilter = .none, verifyChecksums: Bool = false,
+        filter: TransferFilter = .none, verifyChecksums: Bool = false, defaultConflict: ConflictPolicy? = nil,
         beforeOverwrite: (@Sendable (_ path: String, _ fs: any RemoteFileSystem) async throws -> Void)? = nil,
         makeSession: @escaping @Sendable () async throws -> any RemoteFileSystem
     ) {
         self.filter = filter
         self.verifyChecksums = verifyChecksums
+        self.defaultConflict = defaultConflict
         self.beforeOverwrite = beforeOverwrite
         self.id = id
         self.label = label
@@ -59,12 +62,13 @@ public struct TransferSite: Sendable {
 
     public init(
         connection: Connection, filter: TransferFilter = .none, verifyChecksums: Bool = false,
+        defaultConflict: ConflictPolicy? = nil,
         beforeOverwrite: (@Sendable (_ path: String, _ fs: any RemoteFileSystem) async throws -> Void)? = nil,
         makeSession: @escaping @Sendable () async throws -> any RemoteFileSystem
     ) {
         self.init(id: connection.id, label: connection.name, maxConnections: connection.maxConnections,
                   connectDelayMs: connection.connectDelayMs, filter: filter, verifyChecksums: verifyChecksums,
-                  beforeOverwrite: beforeOverwrite, makeSession: makeSession)
+                  defaultConflict: defaultConflict ?? connection.defaultConflictAction, beforeOverwrite: beforeOverwrite, makeSession: makeSession)
     }
 
     /// The endpoint to put in a `TransferRequest`. `fs` is only a fallback; see `TransferEndpoint.siteId`.
@@ -109,21 +113,106 @@ public struct TransferRequest: Sendable {
     public var isRelay: Bool { !source.isLocal && !destination.isLocal }
 }
 
-public enum ConflictPolicy: Sendable, Equatable {
-    case ask, overwrite, overwriteIfNewer, skip, rename
+/// What to do when a file already exists at the destination (FileZilla's set of rules).
+public enum ConflictPolicy: String, Sendable, Equatable, CaseIterable, Codable {
+    case ask, overwrite, overwriteIfNewer, overwriteIfDifferent, overwriteIfSizeDiffers, resume, skip, rename
+
+    public var title: String {
+        switch self {
+        case .ask: "Ask"
+        case .overwrite: "Overwrite"
+        case .overwriteIfNewer: "Overwrite if newer"
+        case .overwriteIfDifferent: "Overwrite if different"
+        case .overwriteIfSizeDiffers: "Overwrite if size differs"
+        case .resume: "Resume"
+        case .skip: "Skip"
+        case .rename: "Rename"
+        }
+    }
+
+    /// The action this policy stands for; nil for `.ask`.
+    public var action: ConflictAction? { ConflictAction(rawValue: rawValue) }
 }
 
-public enum ConflictAction: Sendable, Equatable {
-    case overwrite, overwriteIfNewer, skip, rename
-    /// Abort this transfer (with apply-to-all: everything queued).
+public enum ConflictAction: String, Sendable, Equatable, CaseIterable {
+    case overwrite, overwriteIfNewer, overwriteIfDifferent, overwriteIfSizeDiffers
+    /// Append to a partial file at the destination.
+    case resume
+    case skip, rename
+    /// Abort this transfer (with a scope wider than this file: everything queued).
     case cancel
+
+    public var title: String { ConflictPolicy(rawValue: rawValue)?.title ?? "Cancel" }
+
+    /// For the conditional overwrite actions: whether the source should replace the destination.
+    public func replaces(
+        sourceSize: UInt64?, sourceModified: Date?, destinationSize: UInt64?, destinationModified: Date?, tolerance: TimeInterval = 1
+    ) -> Bool {
+        switch self {
+        case .overwriteIfNewer:
+            guard let new = sourceModified, let old = destinationModified else { return true }
+            return new.timeIntervalSince(old) > tolerance
+        case .overwriteIfDifferent:
+            if let a = sourceSize, let b = destinationSize, a != b { return true }
+            if let new = sourceModified, let old = destinationModified { return abs(new.timeIntervalSince(old)) > tolerance }
+            return sourceSize == nil || destinationSize == nil
+        case .overwriteIfSizeDiffers:
+            guard let a = sourceSize, let b = destinationSize else { return true }
+            return a != b
+        default:
+            return true
+        }
+    }
+}
+
+/// How far a decision reaches.
+public enum ConflictScope: Sendable, Equatable, CaseIterable {
+    case thisFile
+    /// Everything still in the queue; forgotten when the queue empties.
+    case allRemaining
+    case uploadsOnly
+    case downloadsOnly
+    /// Until the app quits.
+    case session
+
+    public var title: String {
+        switch self {
+        case .thisFile: "This file only"
+        case .allRemaining: "All remaining items in the queue"
+        case .uploadsOnly: "Only uploads"
+        case .downloadsOnly: "Only downloads"
+        case .session: "This session"
+        }
+    }
 }
 
 public struct ConflictDecision: Sendable, Equatable {
     public var action: ConflictAction
-    public var applyToAll: Bool
-    public init(_ action: ConflictAction, applyToAll: Bool = false) { self.action = action; self.applyToAll = applyToAll }
+    public var scope: ConflictScope
+    public var applyToAll: Bool { scope == .allRemaining }
+
+    public init(_ action: ConflictAction, applyToAll: Bool = false) {
+        self.action = action
+        scope = applyToAll ? .allRemaining : .thisFile
+    }
+
+    public init(_ action: ConflictAction, scope: ConflictScope) {
+        self.action = action
+        self.scope = scope
+    }
 }
+
+/// Why the queue left an existing file alone.
+public enum SkipReason: String, Sendable, Equatable, CaseIterable, Hashable {
+    /// A conditional rule found nothing to update, or a partial file was already complete.
+    case unchanged
+    /// The user (or a rule) chose Skip.
+    case kept
+
+    public var title: String { self == .unchanged ? "unchanged" : "kept existing" }
+}
+
+public enum ConflictDirection: Sendable, Equatable { case upload, download, relay }
 
 public struct ConflictInfo: Sendable, Equatable {
     public var jobId: UUID
@@ -135,6 +224,19 @@ public struct ConflictInfo: Sendable, Equatable {
     public var sourceModified: Date?
     public var destinationSize: UInt64?
     public var destinationModified: Date?
+    public var direction: ConflictDirection = .upload
+
+    public init(
+        jobId: UUID, name: String, route: String, sourcePath: String, destinationPath: String,
+        sourceSize: UInt64? = nil, sourceModified: Date? = nil, destinationSize: UInt64? = nil, destinationModified: Date? = nil,
+        direction: ConflictDirection = .upload
+    ) {
+        self.jobId = jobId; self.name = name; self.route = route
+        self.sourcePath = sourcePath; self.destinationPath = destinationPath
+        self.sourceSize = sourceSize; self.sourceModified = sourceModified
+        self.destinationSize = destinationSize; self.destinationModified = destinationModified
+        self.direction = direction
+    }
 }
 
 /// Asked once per conflicting file when the policy is `.ask`. Calls are serialised.

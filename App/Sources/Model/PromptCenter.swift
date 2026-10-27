@@ -43,7 +43,19 @@ struct ConfirmAnswer: Equatable {
     var suppress: Bool
 }
 
+struct LeftoverRequest: Identifiable, Equatable {
+    let id = UUID()
+    var queued: Int
+    var failed: Int
+}
+
+struct LeftoverAnswer: Equatable {
+    var choice: LeftoverChoice
+    var remember: Bool
+}
+
 enum ActivePrompt: Identifiable, Equatable {
+    case leftovers(LeftoverRequest)
     case conflict(ConflictRequest)
     case password(PasswordRequest)
     case hostKey(HostKeyRequest)
@@ -51,6 +63,7 @@ enum ActivePrompt: Identifiable, Equatable {
 
     var id: UUID {
         switch self {
+        case .leftovers(let r): r.id
         case .conflict(let r): r.id
         case .password(let r): r.id
         case .hostKey(let r): r.id
@@ -66,8 +79,10 @@ final class PromptCenter {
     private(set) var passwords: [PasswordRequest] = []
     private(set) var hostKeys: [HostKeyRequest] = []
     private(set) var confirmations: [ConfirmRequest] = []
+    private(set) var leftovers: [LeftoverRequest] = []
 
     @ObservationIgnored private var confirmWaiters: [UUID: CheckedContinuation<ConfirmAnswer, Never>] = [:]
+    @ObservationIgnored private var leftoverWaiters: [UUID: CheckedContinuation<LeftoverAnswer, Never>] = [:]
     @ObservationIgnored private var conflictWaiters: [UUID: CheckedContinuation<ConflictDecision, Never>] = [:]
     @ObservationIgnored private var passwordWaiters: [UUID: CheckedContinuation<String?, Never>] = [:]
     @ObservationIgnored private var hostKeyWaiters: [UUID: CheckedContinuation<Bool, Never>] = [:]
@@ -78,8 +93,22 @@ final class PromptCenter {
         if let r = hostKeys.first { return .hostKey(r) }
         if let r = passwords.first { return .password(r) }
         if let r = confirmations.first { return .confirm(r) }
+        if let r = leftovers.first { return .leftovers(r) }
         if let r = conflicts.first { return .conflict(r) }
         return nil
+    }
+
+    func askLeftovers(queued: Int, failed: Int) async -> LeftoverAnswer {
+        let request = LeftoverRequest(queued: queued, failed: failed)
+        return await withCheckedContinuation { continuation in
+            leftoverWaiters[request.id] = continuation
+            leftovers.append(request)
+        }
+    }
+
+    func resolveLeftovers(_ id: UUID, _ answer: LeftoverAnswer) {
+        leftovers.removeAll { $0.id == id }
+        leftoverWaiters.removeValue(forKey: id)?.resume(returning: answer)
     }
 
     func askConflict(_ info: ConflictInfo) async -> ConflictDecision {

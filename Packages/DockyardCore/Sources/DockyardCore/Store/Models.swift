@@ -124,6 +124,8 @@ public struct Connection: Sendable, Hashable, Identifiable {
     public var pinnedFolders: [PinnedFolder]
     /// Per-site skip patterns (gitignore style), on top of the global defaults.
     public var transferFilters: [String]
+    /// What to do about existing files on this site; nil follows the global default in Settings.
+    public var defaultConflictAction: ConflictPolicy?
 
     /// Most simultaneous connections the transfer queue may open to this site (1...10).
     public var maxConnections: Int
@@ -170,6 +172,7 @@ public struct Connection: Sendable, Hashable, Identifiable {
         jumpHost: UUID? = nil,
         pinnedFolders: [PinnedFolder] = [],
         transferFilters: [String] = [],
+        defaultConflictAction: ConflictPolicy? = nil,
         maxConnections: Int = Connection.defaultMaxConnections,
         connectDelayMs: Int = 0
     ) {
@@ -209,6 +212,7 @@ public struct Connection: Sendable, Hashable, Identifiable {
         self.jumpHost = jumpHost
         self.pinnedFolders = pinnedFolders
         self.transferFilters = transferFilters
+        self.defaultConflictAction = defaultConflictAction
         self.maxConnections = min(max(maxConnections, Self.maxConnectionsRange.lowerBound), Self.maxConnectionsRange.upperBound)
         self.connectDelayMs = max(0, connectDelayMs)
     }
@@ -286,6 +290,7 @@ extension Connection: FetchableRecord, PersistableRecord, TableRecord {
             jumpHost: (row["jumpHost"] as String?).flatMap { UUID(uuidString: $0) },
             pinnedFolders: Self.decodeJSON(row["pinnedFolders"], default: []),
             transferFilters: Self.decodeJSON(row["transferFilters"], default: []),
+            defaultConflictAction: (row["defaultConflictAction"] as String?).flatMap(ConflictPolicy.init(rawValue:)),
             maxConnections: row["maxConnections"],
             connectDelayMs: row["connectDelayMs"]
         )
@@ -340,6 +345,7 @@ extension Connection: FetchableRecord, PersistableRecord, TableRecord {
         container["jumpHost"] = jumpHost?.uuidString
         container["pinnedFolders"] = String(decoding: try JSONEncoder().encode(pinnedFolders), as: UTF8.self)
         container["transferFilters"] = String(decoding: try JSONEncoder().encode(transferFilters), as: UTF8.self)
+        container["defaultConflictAction"] = defaultConflictAction?.rawValue
         container["maxConnections"] = maxConnections
         container["connectDelayMs"] = connectDelayMs
     }
