@@ -58,7 +58,12 @@ enum FileSystemFactory {
         if DemoMode.isEnabled { return DemoFileSystem(kind: .server) }
         switch connection.protocol {
         case .sftp:
-            return SFTPFileSystem(config: connection.config, secrets: secrets, hostKeyValidator: hostKeyValidator)
+            // Root browsing on PROD sites waits for the "ask before elevating" prompt, which is not built yet.
+            let asRoot = connection.elevateFileBrowsing && connection.elevation != .none
+                && !(connection.isProd && connection.askBeforeElevatingOnProd)
+            return SFTPFileSystem(
+                config: connection.config, secrets: secrets, hostKeyValidator: hostKeyValidator,
+                options: SFTPFileSystem.Options(browseAsRoot: asRoot))
         case .ftp, .ftps:
             return FTPFileSystem(config: connection.config, secrets: secrets)
         case .rclone:

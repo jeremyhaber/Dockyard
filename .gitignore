@@ -12,3 +12,6 @@ build/
 # Claude Code agent worktrees
 .claude/worktrees/
 Packages/*/Package.resolved
+
+# XcodeGen output
+App/Dockyard.xcodeproj/
