@@ -7,6 +7,9 @@ public enum ConnectionSource: Sendable, Hashable, RawRepresentable {
     case manual
     case quickConnect
     case filezillaImport
+    case transmitImport
+    case cyberduckImport
+    case sshConfigImport
     case whm(UUID)
 
     public var rawValue: String {
@@ -14,6 +17,9 @@ public enum ConnectionSource: Sendable, Hashable, RawRepresentable {
         case .manual: "manual"
         case .quickConnect: "quickConnect"
         case .filezillaImport: "filezillaImport"
+        case .transmitImport: "transmitImport"
+        case .cyberduckImport: "cyberduckImport"
+        case .sshConfigImport: "sshConfigImport"
         case .whm(let id): "whm:\(id.uuidString)"
         }
     }
@@ -23,6 +29,9 @@ public enum ConnectionSource: Sendable, Hashable, RawRepresentable {
         case "manual": self = .manual
         case "quickConnect": self = .quickConnect
         case "filezillaImport": self = .filezillaImport
+        case "transmitImport": self = .transmitImport
+        case "cyberduckImport": self = .cyberduckImport
+        case "sshConfigImport": self = .sshConfigImport
         default:
             guard rawValue.hasPrefix("whm:"), let id = UUID(uuidString: String(rawValue.dropFirst(4))) else { return nil }
             self = .whm(id)
@@ -56,6 +65,15 @@ public struct CloudSpec: Sendable, Hashable, Codable {
     public var listsBuckets: Bool {
         (backend == "s3" || backend == "b2") && root.trimmingCharacters(in: CharacterSet(charactersIn: "/")).isEmpty
     }
+}
+
+/// A server folder pinned on a connection.
+public struct PinnedFolder: Sendable, Hashable, Codable {
+    public var path: String
+    public var label: String?
+    public init(path: String, label: String? = nil) { self.path = path; self.label = label }
+
+    public var title: String { label ?? RemotePath.lastComponent(of: path) }
 }
 
 public struct Connection: Sendable, Hashable, Identifiable {
@@ -94,6 +112,18 @@ public struct Connection: Sendable, Hashable, Identifiable {
     public var localFolder: String?
     /// Set for `rclone` connections.
     public var cloud: CloudSpec?
+    /// Moves deleted files into the remote trash instead of deleting them. Off by default.
+    public var trashOnDelete: Bool
+    /// Moves a file that an upload would overwrite into the remote trash first. Off by default.
+    public var keepVersionsOnOverwrite: Bool
+    /// Blocks uploads, deletes, renames, chmod and extract.
+    public var readOnly: Bool
+    public var verifyChecksums: Bool
+    /// Another saved connection to tunnel through (ProxyJump). Chains follow the referenced connection's own jump host.
+    public var jumpHost: UUID?
+    public var pinnedFolders: [PinnedFolder]
+    /// Per-site skip patterns (gitignore style), on top of the global defaults.
+    public var transferFilters: [String]
 
     public init(
         id: UUID = UUID(),
@@ -124,7 +154,14 @@ public struct Connection: Sendable, Hashable, Identifiable {
         userEditedFields: Set<UserEditableField> = [],
         initialRemotePath: String? = nil,
         localFolder: String? = nil,
-        cloud: CloudSpec? = nil
+        cloud: CloudSpec? = nil,
+        trashOnDelete: Bool = false,
+        keepVersionsOnOverwrite: Bool = false,
+        readOnly: Bool = false,
+        verifyChecksums: Bool = false,
+        jumpHost: UUID? = nil,
+        pinnedFolders: [PinnedFolder] = [],
+        transferFilters: [String] = []
     ) {
         self.id = id
         self.name = name
@@ -155,6 +192,13 @@ public struct Connection: Sendable, Hashable, Identifiable {
         self.initialRemotePath = initialRemotePath
         self.localFolder = localFolder
         self.cloud = cloud
+        self.trashOnDelete = trashOnDelete
+        self.keepVersionsOnOverwrite = keepVersionsOnOverwrite
+        self.readOnly = readOnly
+        self.verifyChecksums = verifyChecksums
+        self.jumpHost = jumpHost
+        self.pinnedFolders = pinnedFolders
+        self.transferFilters = transferFilters
     }
 
     /// The `ConnectionKit` view of this connection.
@@ -222,7 +266,14 @@ extension Connection: FetchableRecord, PersistableRecord, TableRecord {
                 .compactMap(UserEditableField.init(rawValue:))),
             initialRemotePath: row["initialRemotePath"],
             localFolder: row["localFolder"],
-            cloud: Self.decodeCloud(row)
+            cloud: Self.decodeCloud(row),
+            trashOnDelete: row["trashOnDelete"],
+            keepVersionsOnOverwrite: row["keepVersionsOnOverwrite"],
+            readOnly: row["readOnly"],
+            verifyChecksums: row["verifyChecksums"],
+            jumpHost: (row["jumpHost"] as String?).flatMap { UUID(uuidString: $0) },
+            pinnedFolders: Self.decodeJSON(row["pinnedFolders"], default: []),
+            transferFilters: Self.decodeJSON(row["transferFilters"], default: [])
         )
     }
 
@@ -268,6 +319,17 @@ extension Connection: FetchableRecord, PersistableRecord, TableRecord {
         container["cloudBackend"] = cloud?.backend
         container["cloudOptions"] = try cloud.map { String(decoding: try JSONEncoder().encode($0.options), as: UTF8.self) }
         container["cloudRoot"] = cloud?.root
+        container["trashOnDelete"] = trashOnDelete
+        container["keepVersionsOnOverwrite"] = keepVersionsOnOverwrite
+        container["readOnly"] = readOnly
+        container["verifyChecksums"] = verifyChecksums
+        container["jumpHost"] = jumpHost?.uuidString
+        container["pinnedFolders"] = String(decoding: try JSONEncoder().encode(pinnedFolders), as: UTF8.self)
+        container["transferFilters"] = String(decoding: try JSONEncoder().encode(transferFilters), as: UTF8.self)
+    }
+
+    private static func decodeJSON<T: Decodable>(_ text: String, default fallback: T) -> T {
+        (try? JSONDecoder().decode(T.self, from: Data(text.utf8))) ?? fallback
     }
 }
 

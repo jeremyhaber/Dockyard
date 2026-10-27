@@ -127,6 +127,7 @@ public final class DockyardDatabase: Sendable {
                 t.primaryKey(["host", "port", "keyType"])
             }
         }
+        migrator.registerPhase5SafetyMigration()
         return migrator
     }
 }

@@ -52,6 +52,12 @@ public struct SSHExecResult: Sendable {
     public var stderr: Data
     public var exitStatus: Int32
 
+    public init(stdout: Data = Data(), stderr: Data = Data(), exitStatus: Int32) {
+        self.stdout = stdout
+        self.stderr = stderr
+        self.exitStatus = exitStatus
+    }
+
     public var stdoutString: String { String(decoding: stdout, as: UTF8.self) }
     public var stderrString: String { String(decoding: stderr, as: UTF8.self) }
 }
