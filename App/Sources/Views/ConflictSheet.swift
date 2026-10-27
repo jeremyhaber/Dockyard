@@ -41,21 +41,20 @@ struct ConflictSheet: View {
             }
             Divider()
             VStack(spacing: 8) {
-                HStack {
+                HStack(spacing: 8) {
                     ruleButton(.overwrite, isDefault: true)
                     ruleButton(.overwriteIfNewer)
                     ruleButton(.overwriteIfDifferent)
                     ruleButton(.overwriteIfSizeDiffers)
                 }
-                HStack {
+                HStack(spacing: 8) {
                     ruleButton(.resume)
                         .disabled(!canResume)
                         .help(canResume ? "Append the rest of the file to the partial copy" : "Only for a smaller, partial copy")
                     ruleButton(.rename)
                         .help("Keep both: the incoming file gets a numbered name")
                     ruleButton(.skip)
-                    Spacer()
-                    Button("Cancel Transfer") { resolve(.cancel) }
+                    Button { resolve(.cancel) } label: { Text("Cancel Transfer").frame(maxWidth: .infinity) }
                         .help("Stop this transfer\(scope == .thisFile ? "" : " and everything queued")")
                 }
             }
@@ -72,8 +71,7 @@ struct ConflictSheet: View {
     }
 
     private func ruleButton(_ action: ConflictAction, isDefault: Bool = false) -> some View {
-        Button(action.title) { resolve(action) }
-            .frame(maxWidth: .infinity)
+        Button { resolve(action) } label: { Text(action.title).frame(maxWidth: .infinity) }
             .keyboardShortcut(isDefault ? .defaultAction : nil)
     }
 

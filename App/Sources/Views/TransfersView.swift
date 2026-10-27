@@ -399,7 +399,7 @@ final class TransferTableCoordinator: NSObject, NSTableViewDataSource, NSTableVi
             }
             cell.title.stringValue = job.name
             if let error = job.error {
-                cell.detail.stringValue = error
+                cell.detail.stringValue = error.replacingOccurrences(of: "Server replied ", with: "")
                 cell.detail.textColor = .systemRed
             } else {
                 var detail = RemotePathText.parent(job.destinationPath)

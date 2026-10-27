@@ -204,7 +204,7 @@ enum DemoSeeder {
                 source: server, sourcePath: "/home/acme/backups/\(name)", destination: local, destinationPath: "\(folder)/\(name)",
                 size: size, modified: ago(day))
         }
-        let finished: [(String, UInt64)] = [("style.css", 4_212), ("functions.php", 6_033), ("hero-banner.jpg", 1_204_881)]
+        let finished: [(String, UInt64)] = [("header.php", 4_212), ("footer.php", 6_033), ("sidebar.php", 1_204)]
         let target = TransferEndpoint(fs: DemoFileSystem(kind: .server), label: "Acme Corp")
         let done = finished.map { name, size in
             TransferRequest(

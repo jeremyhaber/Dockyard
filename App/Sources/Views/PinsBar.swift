@@ -11,7 +11,8 @@ struct PinsBar: View {
     var body: some View {
         let id = session.connection.id
         let pins = app.safety.pins[id] ?? []
-        Group {
+        VStack(spacing: 0) {
+            Color.clear.frame(height: 0)
             if !pins.isEmpty {
                 VStack(spacing: 0) {
                     HStack(spacing: 0) {
