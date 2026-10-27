@@ -8,43 +8,16 @@ struct DrawerView: View {
     @State private var errorsOnly = false
     @State private var dragBase = 0.0
     @State private var showSnippets = false
+    @State private var transferFolder: TransferJobInfo?
 
     var body: some View {
-        @Bindable var app = app
         let session = app.activeSession
         let hasLines = (session?.logCounts.total ?? 0) > 0
         VStack(spacing: 0) {
             handle
-            HStack(spacing: 10) {
-                Picker("Drawer", selection: $app.drawerTab) {
-                    Text("Log").tag(DrawerTab.log)
-                    Text("Terminal").tag(DrawerTab.terminal)
-                    Text("Transfers").tag(DrawerTab.transfers)
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(width: 270)
-                if app.drawerTab == .terminal, let session, session.status.isConnected, session.shellAvailable {
-                    terminalControls(session)
-                }
-                Spacer()
-                if app.drawerTab == .log {
-                    Toggle("Errors only", isOn: $errorsOnly)
-                        .toggleStyle(.checkbox)
-                    Button("Copy") { copy() }
-                        .controlSize(.small)
-                        .disabled(!hasLines)
-                    Button("Clear") { session?.log.clear() }
-                        .controlSize(.small)
-                        .disabled(!hasLines)
-                }
-                Button {
-                    app.drawerVisible = false
-                } label: {
-                    Image(systemName: "xmark")
-                }
-                .buttonStyle(.borderless)
-                .accessibilityLabel("Close drawer")
+            ViewThatFits(in: .horizontal) {
+                header(.full, session: session, hasLines: hasLines)
+                header(.compact, session: session, hasLines: hasLines)
             }
             .padding(.horizontal, 10)
             .frame(height: 30)
@@ -65,7 +38,7 @@ struct DrawerView: View {
                         placeholder(icon: "terminal", text: "Open a connection to use its terminal.")
                     }
                 case .transfers:
-                    TransfersView()
+                    TransfersView(folder: $transferFolder)
                 }
             }
         }
@@ -76,6 +49,53 @@ struct DrawerView: View {
         .sheet(isPresented: $showSnippets) {
             if let session { SnippetsSheet(session: session) }
         }
+    }
+
+    /// One row: the tabs, then the active tab's own controls, then the close button.
+    private func header(_ style: DrawerHeaderStyle, session: ConnectionSession?, hasLines: Bool) -> some View {
+        @Bindable var app = app
+        return HStack(spacing: 10) {
+            Picker("Drawer", selection: $app.drawerTab) {
+                Text("Log").tag(DrawerTab.log)
+                Text("Terminal").tag(DrawerTab.terminal)
+                Text("Transfers").tag(DrawerTab.transfers)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(width: 240)
+            switch app.drawerTab {
+            case .transfers:
+                TransfersSubTabs(folder: $transferFolder)
+                Spacer(minLength: 8)
+                TransfersActions(style: style)
+            case .log:
+                Spacer(minLength: 8)
+                Toggle("Errors only", isOn: $errorsOnly)
+                    .toggleStyle(.checkbox)
+                    .controlSize(.small)
+                Button { copy() } label: { Label("Copy", systemImage: "doc.on.doc") }
+                    .controlSize(.small)
+                    .disabled(!hasLines)
+                    .help("Copy the log")
+                Button { session?.log.clear() } label: { Label("Clear", systemImage: "trash") }
+                    .controlSize(.small)
+                    .disabled(!hasLines)
+                    .help("Clear the log")
+            case .terminal:
+                Spacer(minLength: 8)
+                if let session, session.status.isConnected, session.shellAvailable {
+                    terminalControls(session)
+                }
+            }
+            Button {
+                app.drawerVisible = false
+            } label: {
+                Image(systemName: "xmark")
+            }
+            .buttonStyle(.borderless)
+            .accessibilityLabel("Close drawer")
+        }
+        .drawerLabels(style)
     }
 
     @ViewBuilder
