@@ -22,6 +22,14 @@ public struct ConnectionFilter: Sendable, Equatable {
         case never
     }
 
+    /// Last known test result. Connections never tested count as `.untested`.
+    public enum Health: Sendable, Equatable {
+        /// Any status other than OK.
+        case failing
+        case ok
+        case untested
+    }
+
     public var scope: Scope
     /// Free text; every whitespace separated token must match name, client, host, username or tags.
     public var search: String
@@ -30,14 +38,19 @@ public struct ConnectionFilter: Sendable, Equatable {
     public var tag: String?
     public var lastUsed: LastUsed?
     public var hideRemovedFromSource: Bool
+    public var health: Health?
+    /// Soft-deleted connections are hidden unless a caller (such as a sync that must not resurrect them) asks for them.
+    public var includeRemoved: Bool
 
     public init(
         scope: Scope = .all, search: String = "", protocols: Set<ConnectionProtocol> = [],
-        whmServer: UUID? = nil, tag: String? = nil, lastUsed: LastUsed? = nil, hideRemovedFromSource: Bool = false
+        whmServer: UUID? = nil, tag: String? = nil, lastUsed: LastUsed? = nil, hideRemovedFromSource: Bool = false,
+        health: Health? = nil, includeRemoved: Bool = false
     ) {
         self.scope = scope; self.search = search; self.protocols = protocols
         self.whmServer = whmServer; self.tag = tag; self.lastUsed = lastUsed
         self.hideRemovedFromSource = hideRemovedFromSource
+        self.health = health; self.includeRemoved = includeRemoved
     }
 
     public static let all = ConnectionFilter()
@@ -93,8 +106,8 @@ public final class OpenConnections: Sendable {
 }
 
 public final class ConnectionRepository: Sendable {
-    private let db: DockyardDatabase
-    private let clock: any DockyardClock
+    let db: DockyardDatabase
+    let clock: any DockyardClock
     public let openConnections: OpenConnections
 
     public init(database: DockyardDatabase, clock: any DockyardClock = SystemClock(), openConnections: OpenConnections = OpenConnections()) {
@@ -168,7 +181,7 @@ public final class ConnectionRepository: Sendable {
         try await db.writer.read { db in
             try Connection.fetchOne(
                 db,
-                sql: "SELECT * FROM connection WHERE protocol = ? AND host = ? COLLATE NOCASE AND port = ? AND username = ? ORDER BY createdAt LIMIT 1",
+                sql: "SELECT * FROM connection WHERE protocol = ? AND host = ? COLLATE NOCASE AND port = ? AND username = ? AND deletedAt IS NULL ORDER BY createdAt LIMIT 1",
                 arguments: [p.rawValue, host, port, username])
         }
     }
@@ -177,7 +190,7 @@ public final class ConnectionRepository: Sendable {
     public func connection(onePasswordItemId itemId: String, source: ConnectionSource = .onePasswordImport) async throws -> Connection? {
         try await db.writer.read { db in
             try Connection.fetchOne(
-                db, sql: "SELECT * FROM connection WHERE onePasswordItemId = ? AND source = ? ORDER BY createdAt LIMIT 1",
+                db, sql: "SELECT * FROM connection WHERE onePasswordItemId = ? AND source = ? AND deletedAt IS NULL ORDER BY createdAt LIMIT 1",
                 arguments: [itemId, source.rawValue])
         }
     }
@@ -188,7 +201,7 @@ public final class ConnectionRepository: Sendable {
     }
 
     public func count() async throws -> Int {
-        try await db.writer.read { try Connection.fetchCount($0) }
+        try await db.writer.read { try Connection.filter(sql: "deletedAt IS NULL").fetchCount($0) }
     }
 
     /// Distinct tags in use, sorted.
@@ -200,7 +213,7 @@ public final class ConnectionRepository: Sendable {
     /// Connection counts per source (for the manager's Sources list).
     public func sourceCounts() async throws -> [String: Int] {
         try await db.writer.read { db in
-            let rows = try Row.fetchAll(db, sql: "SELECT source, COUNT(*) AS n FROM connection GROUP BY source")
+            let rows = try Row.fetchAll(db, sql: "SELECT source, COUNT(*) AS n FROM connection WHERE deletedAt IS NULL GROUP BY source")
             return Dictionary(uniqueKeysWithValues: rows.map { ($0["source"] as String, $0["n"] as Int) })
         }
     }
@@ -234,7 +247,7 @@ public final class ConnectionRepository: Sendable {
             for await _ in trigger {
                 let ids = tracker.ids
                 guard let rows = try? await writer.read({ db in
-                    try Connection.filter(keys: ids.map(\.uuidString)).fetchAll(db)
+                    try Connection.filter(keys: ids.map(\.uuidString)).filter(sql: "deletedAt IS NULL").fetchAll(db)
                 }) else { continue }
                 let byId = Dictionary(uniqueKeysWithValues: rows.map { ($0.id, $0) })
                 continuation.yield(ids.compactMap { byId[$0] })
@@ -248,7 +261,7 @@ public final class ConnectionRepository: Sendable {
         return out
     }
 
-    private static func stream<T: Sendable>(_ observation: ValueObservation<ValueReducers.Fetch<T>>, in writer: any DatabaseWriter) -> AsyncStream<T> {
+    static func stream<T: Sendable>(_ observation: ValueObservation<ValueReducers.Fetch<T>>, in writer: any DatabaseWriter) -> AsyncStream<T> {
         let (stream, continuation) = AsyncStream<T>.makeStream(bufferingPolicy: .bufferingNewest(1))
         let task = Task {
             do {
@@ -303,6 +316,14 @@ public final class ConnectionRepository: Sendable {
         case nil: break
         }
         if filter.hideRemovedFromSource { clauses.append("c.removedFromSource = 0") }
+        if !filter.includeRemoved { clauses.append("c.deletedAt IS NULL") }
+        let latestStatus = "(SELECT status FROM connectionHealth WHERE connectionId = c.id ORDER BY id DESC LIMIT 1)"
+        switch filter.health {
+        case .failing?: clauses.append("\(latestStatus) <> 'ok'")
+        case .ok?: clauses.append("\(latestStatus) = 'ok'")
+        case .untested?: clauses.append("\(latestStatus) IS NULL")
+        case nil: break
+        }
         for token in filter.search.split(whereSeparator: \.isWhitespace) {
             let like = "%" + Self.escapeLike(String(token)) + "%"
             clauses.append("""

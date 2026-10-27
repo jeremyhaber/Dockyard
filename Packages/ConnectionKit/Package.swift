@@ -41,7 +41,9 @@ let package = Package(
         ),
         .testTarget(
             name: "ConnectionKitTests",
-            dependencies: ["ConnectionKit", .product(name: "Crypto", package: "swift-crypto")]
+            dependencies: [
+                "ConnectionKit", .product(name: "Crypto", package: "swift-crypto"), .product(name: "NIOCore", package: "swift-nio"),
+            ]
         ),
     ],
     swiftLanguageModes: [.v6]

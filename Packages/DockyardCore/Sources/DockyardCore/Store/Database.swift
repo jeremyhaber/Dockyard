@@ -168,6 +168,7 @@ public final class DockyardDatabase: Sendable {
         }
         registerJournalMigration(&migrator)
         migrator.registerOnePasswordMigration()
+        migrator.registerConnectionHealthMigration()
         return migrator
     }
 }

@@ -329,7 +329,10 @@ private struct Rig {
     @Test func migrationComesAfterTheExistingOnes() throws {
         let db = try DockyardDatabase()
         let applied = try db.writer.read { try String.fetchAll($0, sql: "SELECT identifier FROM grdb_migrations ORDER BY rowid") }
-        #expect(applied.last == "onepassword_v1" && applied.contains("journal_v1"))
+        let journal = try #require(applied.firstIndex(of: "journal_v1"))
+        let onePassword = try #require(applied.firstIndex(of: "onepassword_v1"))
+        let health = try #require(applied.firstIndex(of: "connection_health_v1"))
+        #expect(journal < onePassword && onePassword < health)
     }
 
     @Test func sourceRawValueIsStable() {
