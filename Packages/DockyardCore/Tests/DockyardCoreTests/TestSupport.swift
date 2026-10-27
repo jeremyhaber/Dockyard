@@ -37,6 +37,7 @@ func firstValues<T: Sendable>(_ stream: AsyncStream<T>, count: Int, timeout: Tim
     }
 }
 
+@discardableResult
 func waitUntil(timeout: TimeInterval = 5, _ condition: @Sendable () async -> Bool) async -> Bool {
     let end = Date().addingTimeInterval(timeout)
     while Date() < end {
