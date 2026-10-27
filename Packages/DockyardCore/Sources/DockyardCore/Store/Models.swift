@@ -10,6 +10,7 @@ public enum ConnectionSource: Sendable, Hashable, RawRepresentable {
     case transmitImport
     case cyberduckImport
     case sshConfigImport
+    case onePasswordImport
     case whm(UUID)
 
     public var rawValue: String {
@@ -20,6 +21,7 @@ public enum ConnectionSource: Sendable, Hashable, RawRepresentable {
         case .transmitImport: "transmitImport"
         case .cyberduckImport: "cyberduckImport"
         case .sshConfigImport: "sshConfigImport"
+        case .onePasswordImport: "onePasswordImport"
         case .whm(let id): "whm:\(id.uuidString)"
         }
     }
@@ -32,6 +34,7 @@ public enum ConnectionSource: Sendable, Hashable, RawRepresentable {
         case "transmitImport": self = .transmitImport
         case "cyberduckImport": self = .cyberduckImport
         case "sshConfigImport": self = .sshConfigImport
+        case "onePasswordImport": self = .onePasswordImport
         default:
             guard rawValue.hasPrefix("whm:"), let id = UUID(uuidString: String(rawValue.dropFirst(4))) else { return nil }
             self = .whm(id)
@@ -127,6 +130,14 @@ public struct Connection: Sendable, Hashable, Identifiable {
     /// What to do about existing files on this site; nil follows the global default in Settings.
     public var defaultConflictAction: ConflictPolicy?
 
+    /// Which ssh-agent the `.agent` auth method uses.
+    public var agentSocket: AgentSocket
+    /// Secret references per purpose (`op://Vault/Item/password`), resolved at connect time instead of reading the Keychain.
+    /// References are not secrets, but keep them out of logs.
+    public var secretReferences: [SecretPurpose: String]
+    /// The 1Password item this connection was imported from; re-import matches on it.
+    public var onePasswordItemId: String?
+
     /// Most simultaneous connections the transfer queue may open to this site (1...10).
     public var maxConnections: Int
     /// Minimum pause between opening two connections to this site, for hosts that rate-limit logins.
@@ -174,7 +185,10 @@ public struct Connection: Sendable, Hashable, Identifiable {
         transferFilters: [String] = [],
         defaultConflictAction: ConflictPolicy? = nil,
         maxConnections: Int = Connection.defaultMaxConnections,
-        connectDelayMs: Int = 0
+        connectDelayMs: Int = 0,
+        agentSocket: AgentSocket = .system,
+        secretReferences: [SecretPurpose: String] = [:],
+        onePasswordItemId: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -215,13 +229,16 @@ public struct Connection: Sendable, Hashable, Identifiable {
         self.defaultConflictAction = defaultConflictAction
         self.maxConnections = min(max(maxConnections, Self.maxConnectionsRange.lowerBound), Self.maxConnectionsRange.upperBound)
         self.connectDelayMs = max(0, connectDelayMs)
+        self.agentSocket = agentSocket
+        self.secretReferences = secretReferences
+        self.onePasswordItemId = onePasswordItemId
     }
 
     /// The `ConnectionKit` view of this connection.
     public var config: ConnectionConfig {
         ConnectionConfig(
             id: id, protocol: `protocol`, host: host, port: port, username: username,
-            authMethods: authMethods, keyPath: keyPath, elevation: elevation
+            authMethods: authMethods, keyPath: keyPath, elevation: elevation, agentSocket: agentSocket
         )
     }
 
@@ -292,8 +309,16 @@ extension Connection: FetchableRecord, PersistableRecord, TableRecord {
             transferFilters: Self.decodeJSON(row["transferFilters"], default: []),
             defaultConflictAction: (row["defaultConflictAction"] as String?).flatMap(ConflictPolicy.init(rawValue:)),
             maxConnections: row["maxConnections"],
-            connectDelayMs: row["connectDelayMs"]
+            connectDelayMs: row["connectDelayMs"],
+            agentSocket: (row["agentSocket"] as String?).flatMap(AgentSocket.init(rawValue:)) ?? .system,
+            secretReferences: Self.decodeReferences(row["secretReferences"]),
+            onePasswordItemId: row["onePasswordItemId"]
         )
+    }
+
+    private static func decodeReferences(_ json: String?) -> [SecretPurpose: String] {
+        let raw = (json.flatMap { try? JSONDecoder().decode([String: String].self, from: Data($0.utf8)) }) ?? [:]
+        return Dictionary(uniqueKeysWithValues: raw.compactMap { key, value in SecretPurpose(rawValue: key).map { ($0, value) } })
     }
 
     private static func decodeCloud(_ row: Row) -> CloudSpec? {
@@ -348,6 +373,11 @@ extension Connection: FetchableRecord, PersistableRecord, TableRecord {
         container["defaultConflictAction"] = defaultConflictAction?.rawValue
         container["maxConnections"] = maxConnections
         container["connectDelayMs"] = connectDelayMs
+        container["agentSocket"] = agentSocket.rawValue
+        container["secretReferences"] = String(
+            decoding: try JSONEncoder().encode(Dictionary(uniqueKeysWithValues: secretReferences.map { ($0.key.rawValue, $0.value) })),
+            as: UTF8.self)
+        container["onePasswordItemId"] = onePasswordItemId
     }
 
     private static func decodeJSON<T: Decodable>(_ text: String, default fallback: T) -> T {

@@ -1,0 +1,50 @@
+{
+  "id": "m5v8t1zc3yb7e2nq9hw4kx6duj",
+  "title": "Initech FTP",
+  "version": 2,
+  "vault": {
+    "id": "p9a2c4e6g8i0k2m4o6q8s0u2wy",
+    "name": "Clients"
+  },
+  "category": "LOGIN",
+  "tags": [
+    "initech"
+  ],
+  "urls": [
+    {
+      "label": "website",
+      "primary": true,
+      "href": "https://www.initech.example"
+    },
+    {
+      "label": "files",
+      "href": "ftps://ftp.initech.example:990/uploads"
+    }
+  ],
+  "fields": [
+    {
+      "id": "username",
+      "type": "STRING",
+      "purpose": "USERNAME",
+      "label": "username",
+      "value": "bill",
+      "reference": "op://Clients/Initech FTP/username"
+    },
+    {
+      "id": "password",
+      "type": "CONCEALED",
+      "purpose": "PASSWORD",
+      "label": "password",
+      "value": "hunter2",
+      "reference": "op://Clients/Initech FTP/password"
+    },
+    {
+      "id": "TOTP_ABC123",
+      "type": "OTP",
+      "label": "one-time password",
+      "value": "otpauth://totp/x?secret=AAAA",
+      "reference": "op://Clients/Initech FTP/one-time password?attribute=otp",
+      "totp": "123456"
+    }
+  ]
+}

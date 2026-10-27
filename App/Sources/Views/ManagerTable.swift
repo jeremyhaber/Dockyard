@@ -254,6 +254,7 @@ final class ManagerTableCoordinator: NSObject, NSTableViewDataSource, NSTableVie
         case .transmitImport: "Transmit import"
         case .cyberduckImport: "Cyberduck import"
         case .sshConfigImport: "SSH config"
+        case .onePasswordImport: "1Password import"
         case .whm(let id): "WHM: \(parent.sourceLabels[id] ?? "server")"
         }
     }

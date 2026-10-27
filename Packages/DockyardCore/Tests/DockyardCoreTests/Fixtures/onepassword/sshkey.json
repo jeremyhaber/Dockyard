@@ -1,0 +1,43 @@
+{
+  "id": "k9s8r7q6p5o4n3m2l1j0i9h8g7",
+  "title": "Deploy key",
+  "version": 1,
+  "vault": {
+    "id": "bq3d6fz7yzvsr5lk4rpxu2h6im",
+    "name": "Infrastructure"
+  },
+  "category": "SSH_KEY",
+  "tags": [
+    "deploy"
+  ],
+  "fields": [
+    {
+      "id": "private_key",
+      "type": "SSHKEY",
+      "label": "private key",
+      "value": "-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE\n-----END PRIVATE KEY-----\n",
+      "reference": "op://Infrastructure/Deploy key/private key"
+    },
+    {
+      "id": "public_key",
+      "type": "STRING",
+      "label": "public key",
+      "value": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAK",
+      "reference": "op://Infrastructure/Deploy key/public key"
+    },
+    {
+      "id": "fingerprint",
+      "type": "STRING",
+      "label": "fingerprint",
+      "value": "SHA256:FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAK",
+      "reference": "op://Infrastructure/Deploy key/fingerprint"
+    },
+    {
+      "id": "key_type",
+      "type": "STRING",
+      "label": "key type",
+      "value": "ed25519",
+      "reference": "op://Infrastructure/Deploy key/key type"
+    }
+  ]
+}

@@ -37,6 +37,8 @@ public struct ConnectionConfig: Sendable, Hashable, Codable, Identifiable {
     public var authMethods: AuthMethods
     public var keyPath: String?
     public var elevation: Elevation
+    /// The agent used by `.agent` authentication.
+    public var agentSocket: AgentSocket
 
     public init(
         id: UUID = UUID(),
@@ -46,7 +48,8 @@ public struct ConnectionConfig: Sendable, Hashable, Codable, Identifiable {
         username: String,
         authMethods: AuthMethods = .password,
         keyPath: String? = nil,
-        elevation: Elevation = .none
+        elevation: Elevation = .none,
+        agentSocket: AgentSocket = .system
     ) {
         self.id = id
         self.protocol = `protocol`
@@ -56,6 +59,22 @@ public struct ConnectionConfig: Sendable, Hashable, Codable, Identifiable {
         self.authMethods = authMethods
         self.keyPath = keyPath
         self.elevation = elevation
+        self.agentSocket = agentSocket
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            id: try c.decode(UUID.self, forKey: .id),
+            protocol: try c.decode(ConnectionProtocol.self, forKey: .protocol),
+            host: try c.decode(String.self, forKey: .host),
+            port: try c.decode(Int.self, forKey: .port),
+            username: try c.decode(String.self, forKey: .username),
+            authMethods: try c.decode(AuthMethods.self, forKey: .authMethods),
+            keyPath: try c.decodeIfPresent(String.self, forKey: .keyPath),
+            elevation: try c.decode(Elevation.self, forKey: .elevation),
+            agentSocket: try c.decodeIfPresent(AgentSocket.self, forKey: .agentSocket) ?? .system
+        )
     }
 }
 

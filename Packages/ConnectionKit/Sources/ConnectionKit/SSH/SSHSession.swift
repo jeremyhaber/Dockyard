@@ -205,7 +205,9 @@ public final class SSHSession: @unchecked Sendable {
         case .keyboardInteractive(let responder):
             code = try keyboardInteractive(handle, username: username, responder: responder)
         case .agent:
-            code = try agentAuth(handle, username: username)
+            code = try agentAuth(handle, username: username, socketPath: nil)
+        case .agentSocket(let path):
+            code = try agentAuth(handle, username: username, socketPath: path)
         }
         return code == 0 ? "" : "\(step) rejected"
     }
@@ -223,14 +225,15 @@ public final class SSHSession: @unchecked Sendable {
         }
     }
 
-    private func agentAuth(_ handle: OpaquePointer, username: String) throws -> Int32 {
+    private func agentAuth(_ handle: OpaquePointer, username: String, socketPath: String?) throws -> Int32 {
         guard let agent = libssh2_agent_init(handle) else { throw RemoteError.protocolError("Cannot create agent handle") }
         defer {
             libssh2_agent_disconnect(agent)
             libssh2_agent_free(agent)
         }
+        if let socketPath { libssh2_agent_set_identity_path(agent, socketPath) }
         guard libssh2_agent_connect(agent) == 0 else {
-            log(.warning, "Cannot connect to ssh-agent (is SSH_AUTH_SOCK set?)")
+            log(.warning, socketPath.map { "Cannot connect to ssh-agent at \($0)" } ?? "Cannot connect to ssh-agent (is SSH_AUTH_SOCK set?)")
             return LIBSSH2_ERROR_AUTHENTICATION_FAILED
         }
         guard libssh2_agent_list_identities(agent) == 0 else {

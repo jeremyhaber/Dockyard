@@ -19,7 +19,9 @@ enum SSHAuth {
     static func steps(for config: ConnectionConfig, secrets: any SecretStore) async throws -> [SSHAuthStep] {
         let methods = config.authMethods
         var steps: [SSHAuthStep] = []
-        if methods.contains(.agent) { steps.append(.agent) }
+        if methods.contains(.agent) {
+            if let socket = config.agentSocket.resolvedPath() { steps.append(.agentSocket(socket)) } else { steps.append(.agent) }
+        }
         if methods.contains(.key) {
             guard let keyPath = config.keyPath else { throw RemoteError.invalidConfiguration("Key authentication needs a key path") }
             let expanded = (keyPath as NSString).expandingTildeInPath

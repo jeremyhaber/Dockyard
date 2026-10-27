@@ -167,6 +167,7 @@ public final class DockyardDatabase: Sendable {
             try db.create(index: "transferJob_on_root", on: "transferJob", columns: ["rootId"])
         }
         registerJournalMigration(&migrator)
+        migrator.registerOnePasswordMigration()
         migrator.registerConflictDefaultMigration()
         return migrator
     }
