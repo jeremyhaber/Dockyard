@@ -55,7 +55,15 @@ final class AppModel {
     let knownHosts: KnownHostRepository
     let snippets: SnippetRepository
     let journal: ChangeJournal
+    /// What connections read their secrets from: the Keychain behind the Touch ID gate, or 1Password when the connection
+    /// has a reference for that secret.
     let secrets: any SecretStore
+    /// The Keychain behind the Touch ID gate, without reference resolution (export, duplicate, imports that write secrets).
+    let keychainSecrets: any SecretStore
+    let resolvingSecrets: ResolvingSecretStore
+    let onePassword: OnePasswordCenter
+    let healthRepository: ConnectionHealthRepository
+    let health: HealthCenter
     /// The Keychain store without the Touch ID gate, for reads that are not about connecting (is a password saved, WHM sync).
     let ungatedSecrets: any SecretStore
     let quickConnectService: QuickConnectService
@@ -74,6 +82,7 @@ final class AppModel {
     private(set) var connectionsRevision = 0
     private(set) var clientNames: [UUID: String] = [:]
     private(set) var transfers = TransferSnapshot.empty
+    var recentlyRemoved: [Connection] = []
 
     var drawerVisible = false
     var drawerTab: DrawerTab = .log
@@ -120,9 +129,13 @@ final class AppModel {
             db = (try? DockyardDatabase()) ?? { fatalError("in-memory database unavailable") }()
         }
         let ungated = FileSystemFactory.secretStore()
-        let secrets: any SecretStore = DemoMode.isEnabled ? ungated : GatedSecretStore(base: ungated)
+        let keychain: any SecretStore = DemoMode.isEnabled ? ungated : GatedSecretStore(base: ungated)
         let prompts = PromptCenter()
         let repo = ConnectionRepository(database: db)
+        let onePassword = OnePasswordCenter(cli: DemoMode.isEnabled ? DemoOnePassword.cli : OnePasswordCLI())
+        let secrets = ResolvingSecretStore(
+            fallback: keychain, references: repo, resolver: onePassword.cli, options: ResolvingSecretStore.Options(cacheTTL: 10))
+        let healthRepo = ConnectionHealthRepository(database: db)
         let sessionRepo = SessionRepository(database: db)
         self.database = db
         self.connections = repo
@@ -135,6 +148,11 @@ final class AppModel {
         self.snippets = SnippetRepository(database: db)
         self.journal = ChangeJournal(database: db)
         self.secrets = secrets
+        self.resolvingSecrets = secrets
+        self.keychainSecrets = keychain
+        self.onePassword = onePassword
+        self.healthRepository = healthRepo
+        self.health = HealthCenter(repository: healthRepo)
         self.ungatedSecrets = ungated
         self.quickConnectService = QuickConnectService(repository: repo, secrets: ungated)
         self.sessionService = SessionService(repository: sessionRepo, saver: SessionSaver(repository: sessionRepo))
@@ -157,10 +175,13 @@ final class AppModel {
         self.startupError = startup
         siteHost.model = self
         startObserving()
+        startHealthObservers()
         if demo {
             Task { await DemoSeeder.run(self) }
         } else {
             startWHMScheduler()
+            purgeExpiredRemovals()
+            installSecretCacheFlush()
             migrateSecretsIfNeeded()
             startFinderLogRelay()
             Task { await offerToResumeTransfers() }
@@ -698,8 +719,8 @@ final class AppModel {
         copy.userEditedFields = []
         try? await connections.save(copy)
         for purpose in SecretPurpose.allCases {
-            if let value = try? await secrets.secret(for: connection.id, purpose: purpose) {
-                try? await secrets.setSecret(value, for: copy.id, purpose: purpose)
+            if let value = try? await keychainSecrets.secret(for: connection.id, purpose: purpose) {
+                try? await keychainSecrets.setSecret(value, for: copy.id, purpose: purpose)
             }
         }
         return copy

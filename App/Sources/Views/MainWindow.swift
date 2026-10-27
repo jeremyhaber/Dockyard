@@ -60,7 +60,7 @@ struct MainWindow: View {
         .frame(minWidth: 980, minHeight: 620)
         .task {
             guard DemoMode.isEnabled else { return }
-            if DemoMode.screen == "connectionManager" { openWindow(id: "manager") }
+            if DemoMode.opensManager { openWindow(id: "manager") }
             if DemoMode.screen == "settings" { openSettings() }
         }
     }

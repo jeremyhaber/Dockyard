@@ -16,8 +16,22 @@ enum LastUsedChoice: String, CaseIterable, Identifiable {
     }
 }
 
+/// The Status filter chip.
+enum HealthChoice: String, CaseIterable, Identifiable {
+    case failing = "Failing", ok = "OK", untested = "Untested"
+    var id: String { rawValue }
+
+    var filter: ConnectionFilter.Health {
+        switch self {
+        case .failing: .failing
+        case .ok: .ok
+        case .untested: .untested
+        }
+    }
+}
+
 enum ManagerScope: Hashable {
-    case all, favorites, openNow, recentlyAdded
+    case all, favorites, openNow, recentlyAdded, recentlyRemoved
     case whm(UUID)
     case filezilla, manual, quickConnect
     case imported(ConnectionSource)
@@ -30,7 +44,9 @@ struct ManagerFilterKey: Hashable {
     var whmServer: UUID?
     var tag: String?
     var lastUsed: LastUsedChoice?
+    var health: HealthChoice?
     var revision: Int
+    var healthRevision: Int
     var openCount: Int
 }
 
@@ -42,6 +58,7 @@ final class ConnectionManagerModel {
     var whmServer: UUID?
     var tag: String?
     var lastUsed: LastUsedChoice?
+    var health: HealthChoice?
     var selection: Set<UUID> = []
     var notice: String?
 
@@ -53,7 +70,8 @@ final class ConnectionManagerModel {
     func key(app: AppModel) -> ManagerFilterKey {
         ManagerFilterKey(
             scope: scope, search: search, protocols: protocols.map(\.rawValue).sorted(), whmServer: whmServer,
-            tag: tag, lastUsed: lastUsed, revision: app.connectionsRevision, openCount: app.sessions.count)
+            tag: tag, lastUsed: lastUsed, health: health, revision: app.connectionsRevision,
+            healthRevision: health == nil ? 0 : app.health.revision, openCount: app.sessions.count)
     }
 
     func filter(app: AppModel) -> ConnectionFilter {
@@ -63,6 +81,7 @@ final class ConnectionManagerModel {
         case .favorites: scopeFilter = .favorites
         case .openNow: scopeFilter = .ids(Array(Set(app.sessions.map(\.connection.id))))
         case .recentlyAdded: scopeFilter = .recentlyAdded(limit: 50)
+        case .recentlyRemoved: scopeFilter = .all
         case .whm(let id): scopeFilter = .source(.whm(id))
         case .filezilla: scopeFilter = .source(.filezillaImport)
         case .manual: scopeFilter = .source(.manual)
@@ -71,7 +90,7 @@ final class ConnectionManagerModel {
         }
         return ConnectionFilter(
             scope: scopeFilter, search: search, protocols: protocols, whmServer: whmServer,
-            tag: tag, lastUsed: lastUsed?.filter)
+            tag: tag, lastUsed: lastUsed?.filter, health: health?.filter)
     }
 
     func reload(app: AppModel) async {
@@ -87,13 +106,14 @@ final class ConnectionManagerModel {
 
     func count(for source: ConnectionSource) -> Int { counts[source.rawValue] ?? 0 }
 
-    var hasActiveFilters: Bool { !protocols.isEmpty || whmServer != nil || tag != nil || lastUsed != nil }
+    var hasActiveFilters: Bool { !protocols.isEmpty || whmServer != nil || tag != nil || lastUsed != nil || health != nil }
 
     func clearFilters() {
         protocols = []
         whmServer = nil
         tag = nil
         lastUsed = nil
+        health = nil
     }
 
     func selectedConnections() -> [Connection] { results.filter { selection.contains($0.id) } }

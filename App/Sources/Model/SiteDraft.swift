@@ -16,12 +16,28 @@ enum DraftProtocol: String, CaseIterable, Identifiable {
     }
 }
 
+/// Where the SSH agent method looks for the agent.
+enum AgentChoice: String, CaseIterable, Identifiable {
+    case system, onePassword, custom
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .system: "System (SSH_AUTH_SOCK)"
+        case .onePassword: "1Password"
+        case .custom: "Custom path"
+        }
+    }
+}
+
 enum SiteDraftError: Error, Equatable, CustomStringConvertible {
     case missingHost
     case invalidPort(String)
     case missingKeyPath
     case noAuthMethod
     case jump(String)
+    case invalidReference(String)
+    case missingAgentPath
 
     var description: String {
         switch self {
@@ -30,6 +46,8 @@ enum SiteDraftError: Error, Equatable, CustomStringConvertible {
         case .missingKeyPath: "Choose the private key file, or turn off SSH key."
         case .noAuthMethod: "Turn on at least one authentication method."
         case .jump(let message): message
+        case .invalidReference(let what): "The 1Password reference for the \(what) must look like op://Vault/Item/field."
+        case .missingAgentPath: "Enter the path of the agent socket, or choose another agent."
         }
     }
 }
@@ -51,6 +69,11 @@ struct SiteDraft {
     var useAgent = false
     var password = ""
     var keyPassphrase = ""
+    var agentChoice = AgentChoice.system
+    var agentPath = ""
+    /// Secrets that come from 1Password instead of the Keychain, and their `op://` references.
+    var onePasswordPurposes: Set<SecretPurpose> = []
+    var references: [SecretPurpose: String] = [:]
 
     var elevation = Elevation.none
     var elevationPassword = ""
@@ -98,6 +121,15 @@ struct SiteDraft {
         keyPath = c.keyPath ?? ""
         usePassword = c.authMethods.contains(.password)
         useAgent = c.authMethods.contains(.agent)
+        switch c.agentSocket {
+        case .system: agentChoice = .system
+        case .onePassword: agentChoice = .onePassword
+        case .custom(let path):
+            agentChoice = .custom
+            agentPath = path
+        }
+        references = c.secretReferences
+        onePasswordPurposes = Set(c.secretReferences.keys)
         elevation = c.elevation
         elevateFileBrowsing = c.elevateFileBrowsing
         askBeforeElevatingOnProd = c.askBeforeElevatingOnProd
@@ -152,6 +184,9 @@ struct SiteDraft {
             auth = .password
         }
 
+        if proto == .sftp, useAgent, agentChoice == .custom, agentPath.trimmingCharacters(in: .whitespaces).isEmpty {
+            throw SiteDraftError.missingAgentPath
+        }
         var c = original ?? Connection(name: "", host: trimmedHost, username: "")
         c.id = id
         c.name = name.trimmingCharacters(in: .whitespaces).isEmpty ? (trimmedHost.isEmpty ? cloudPreset.title : trimmedHost) : name
@@ -179,7 +214,48 @@ struct SiteDraft {
         c.restoreSession = restoreSession
         c.jumpHost = proto == .sftp ? jumpHost : nil
         c.cloud = isCloud ? cloudPreset.spec(root: cloudRoot, region: cloudRegion) : nil
+        c.agentSocket = agentSocket(for: proto)
+        c.secretReferences = try secretReferences()
         return c
+    }
+
+    private func agentSocket(for proto: ConnectionProtocol) -> AgentSocket {
+        guard proto == .sftp, useAgent else { return .system }
+        switch agentChoice {
+        case .system: return .system
+        case .onePassword: return .onePassword
+        case .custom: return .custom(agentPath.trimmingCharacters(in: .whitespaces))
+        }
+    }
+
+    /// Whether the editor shows a source choice for `purpose` with the current protocol and options.
+    func offers(_ purpose: SecretPurpose) -> Bool {
+        switch (protocolChoice, purpose) {
+        case (.sftp, .password): usePassword
+        case (.sftp, .keyPassphrase): useKey
+        case (.sftp, .elevationPassword): elevation != .none
+        case (.ftp, .password), (.ftps, .password): true
+        default: false
+        }
+    }
+
+    private func secretReferences() throws -> [SecretPurpose: String] {
+        var out: [SecretPurpose: String] = [:]
+        for purpose in [SecretPurpose.password, .keyPassphrase, .elevationPassword] where onePasswordPurposes.contains(purpose) && offers(purpose) {
+            let text = (references[purpose] ?? "").trimmingCharacters(in: .whitespaces)
+            guard OnePasswordCLI.isValidReference(text) else { throw SiteDraftError.invalidReference(Self.name(of: purpose)) }
+            out[purpose] = text
+        }
+        return out
+    }
+
+    static func name(of purpose: SecretPurpose) -> String {
+        switch purpose {
+        case .password: "password"
+        case .keyPassphrase: "key passphrase"
+        case .elevationPassword: "elevation password"
+        case .cloudToken: "cloud secret"
+        }
     }
 
     /// Secrets that were typed in; empty fields leave the stored value alone.
@@ -189,9 +265,9 @@ struct SiteDraft {
             if !cloudSecret.isEmpty { out.append((.cloudToken, cloudSecret)) }
             return out
         }
-        if !password.isEmpty { out.append((.password, password)) }
-        if !keyPassphrase.isEmpty { out.append((.keyPassphrase, keyPassphrase)) }
-        if !elevationPassword.isEmpty { out.append((.elevationPassword, elevationPassword)) }
+        if !password.isEmpty, !onePasswordPurposes.contains(.password) { out.append((.password, password)) }
+        if !keyPassphrase.isEmpty, !onePasswordPurposes.contains(.keyPassphrase) { out.append((.keyPassphrase, keyPassphrase)) }
+        if !elevationPassword.isEmpty, !onePasswordPurposes.contains(.elevationPassword) { out.append((.elevationPassword, elevationPassword)) }
         return out
     }
 }

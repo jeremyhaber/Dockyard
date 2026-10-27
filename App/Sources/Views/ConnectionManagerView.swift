@@ -30,17 +30,25 @@ struct ConnectionManagerView: View {
                     .padding(.vertical, 6)
                     .background(Palette.selection)
                 }
+                if model.scope == .imported(.onePasswordImport) { onePasswordBanner }
+                if isRemovedList { ManagerRemovedBar(model: model, visible: rows) } else { ManagerHealthBar(model: model) }
                 Divider()
                 ManagerTable(
-                    connections: model.results,
+                    connections: rows,
                     statuses: statuses,
                     clientNames: app.clientNames,
                     sourceLabels: Dictionary(uniqueKeysWithValues: model.whmSources.map { ($0.id, $0.label) }),
                     selection: $model.selection,
-                    actions: actions)
+                    actions: actions,
+                    health: app.health.latest,
+                    testing: app.health.run?.testing ?? [],
+                    paused: app.health.paused,
+                    showsRemoved: isRemovedList)
                 Divider()
                 HStack {
-                    Text("\(model.results.count) of \(app.allConnections.count) connections")
+                    Text(isRemovedList
+                        ? "\(rows.count) removed connection\(rows.count == 1 ? "" : "s")"
+                        : "\(rows.count) of \(app.allConnections.count) connections")
                         .font(.caption)
                         .foregroundStyle(Palette.textSecondary)
                     Spacer()
@@ -57,6 +65,7 @@ struct ConnectionManagerView: View {
         .navigationTitle("Connections")
         .background(WindowAccessor { window in DemoWindows.register("manager", window) })
         .task(id: model.key(app: app)) { await model.reload(app: app) }
+        .onAppear { model.applyDemoScreen() }
         .sheet(item: editorBinding) { request in SiteEditorSheet(request: request) }
         .sheet(isPresented: $showWHM) { WHMSheet(model: model) }
     }
@@ -65,6 +74,33 @@ struct ConnectionManagerView: View {
         Binding(
             get: { app.siteEditor?.origin == .manager ? app.siteEditor : nil },
             set: { if $0 == nil, app.siteEditor?.origin == .manager { app.siteEditor = nil } })
+    }
+
+    private var isRemovedList: Bool { model.scope == .recentlyRemoved }
+
+    /// What the table shows: the filtered results, or the removed connections (searched by name and host).
+    private var rows: [Connection] {
+        guard isRemovedList else { return model.results }
+        let tokens = model.search.split(whereSeparator: \.isWhitespace).map(String.init)
+        return app.recentlyRemoved.filter { c in
+            tokens.allSatisfy { c.name.localizedCaseInsensitiveContains($0) || c.host.localizedCaseInsensitiveContains($0) }
+        }
+    }
+
+    private var onePasswordBanner: some View {
+        HStack {
+            Image(systemName: "key.viewfinder").foregroundStyle(Color.accentColor).accessibilityHidden(true)
+            Text("Imported from 1Password. Importing again updates these connections.").font(.system(size: 12))
+            Spacer()
+            Button("Re-import\u{2026}") { reimportOnePassword() }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(Palette.selection)
+    }
+
+    private func reimportOnePassword() {
+        app.presentOnePasswordImport { model.notice = $0 }
     }
 
     private var statuses: [UUID: SessionStatus] {
@@ -86,7 +122,10 @@ struct ConnectionManagerView: View {
                     app.editConnection(copy, origin: .manager)
                 }
             },
-            delete: { c in Task { await app.delete(c) } },
+            remove: { model.requestRemove($0, app: app) },
+            test: { app.testConnections($0) },
+            restore: { model.requestRestore($0, app: app) },
+            purge: { model.requestDelete($0, all: false, app: app) },
             toggleFavorite: { app.toggleFavorite($0) },
             sideBySide: { c in
                 app.openSideBySide(c)
@@ -116,8 +155,11 @@ struct ConnectionManagerView: View {
                 importedScopeRow("Transmit import", scope: .imported(.transmitImport))
                 importedScopeRow("Cyberduck import", scope: .imported(.cyberduckImport))
                 importedScopeRow("SSH config", scope: .imported(.sshConfigImport))
+                importedScopeRow("1Password", scope: .imported(.onePasswordImport), icon: "key.viewfinder")
                 scopeRow("Added by hand", icon: "hand.point.up.left", scope: .manual, count: model.count(for: .manual))
                 scopeRow("Quick connect", icon: "bolt", scope: .quickConnect, count: model.count(for: .quickConnect))
+                Divider().padding(.vertical, 8)
+                scopeRow("Recently removed", icon: "trash", scope: .recentlyRemoved, count: app.recentlyRemoved.count)
             }
             .padding(8)
         }
@@ -126,9 +168,12 @@ struct ConnectionManagerView: View {
 
     /// Imports from apps the user may not have used only get a row once something came from them.
     @ViewBuilder
-    private func importedScopeRow(_ title: String, scope: ManagerScope) -> some View {
+    private func importedScopeRow(_ title: String, scope: ManagerScope, icon: String = "square.and.arrow.down") -> some View {
         if case .imported(let source) = scope, model.count(for: source) > 0 {
-            scopeRow(title, icon: "square.and.arrow.down", scope: scope, count: model.count(for: source))
+            scopeRow(title, icon: icon, scope: scope, count: model.count(for: source))
+                .contextMenu {
+                    if source == .onePasswordImport { Button("Re-import from 1Password\u{2026}") { reimportOnePassword() } }
+                }
         }
     }
 
@@ -166,11 +211,13 @@ struct ConnectionManagerView: View {
                 }
                 .padding(6)
                 .background(Palette.chrome, in: RoundedRectangle(cornerRadius: 6))
+                if !isRemovedList { ManagerHealthControls(model: model, visible: rows) }
                 Menu {
                     Button("FileZilla sitemanager.xml\u{2026}") { importFileZilla() }
                     Button("Transmit favorites\u{2026}") { app.startImport(.transmit) { model.notice = $0 } }
                     Button("Cyberduck bookmarks\u{2026}") { app.startImport(.cyberduck) { model.notice = $0 } }
                     Button("SSH config (~/.ssh/config)\u{2026}") { app.startImport(.sshConfig) { model.notice = $0 } }
+                    Button("1Password\u{2026}") { reimportOnePassword() }
                     Divider()
                     Button("WHM server\u{2026}") { showWHM = true }
                 } label: {
@@ -186,6 +233,7 @@ struct ConnectionManagerView: View {
                 serverChip
                 tagChip
                 lastUsedChip
+                statusChip
                 if model.hasActiveFilters {
                     Button("Clear filters") { model.clearFilters() }
                         .buttonStyle(.link)
@@ -264,6 +312,21 @@ struct ConnectionManagerView: View {
             }
         } label: {
             chip(model.lastUsed?.rawValue ?? "Last used", active: model.lastUsed != nil)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+    }
+
+    private var statusChip: some View {
+        Menu {
+            Button("Any status") { model.health = nil }
+            Divider()
+            ForEach(HealthChoice.allCases) { choice in
+                Button(choice.rawValue) { model.health = choice }
+            }
+        } label: {
+            chip(model.health.map { "Status: \($0.rawValue)" } ?? "Status", active: model.health != nil)
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)

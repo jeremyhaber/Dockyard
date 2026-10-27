@@ -100,7 +100,7 @@ struct ImportPreviewSheet: View {
     }
 }
 
-private struct ImportRowView: View {
+struct ImportRowView: View {
     let row: ImportRow
 
     var body: some View {

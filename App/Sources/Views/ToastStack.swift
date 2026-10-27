@@ -36,6 +36,14 @@ struct ToastView: View {
                 .buttonStyle(.link)
                 .font(.system(size: 12, weight: .semibold))
             }
+            if let action = toast.action {
+                Button(action.title) {
+                    app.toasts.removeAll { $0.id == toast.id }
+                    action.perform()
+                }
+                .buttonStyle(.link)
+                .font(.system(size: 12, weight: .semibold))
+            }
             Button {
                 app.toasts.removeAll { $0.id == toast.id }
             } label: {

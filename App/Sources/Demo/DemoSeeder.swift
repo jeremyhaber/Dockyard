@@ -5,7 +5,7 @@ import Foundation
 /// Fills the in-memory database with sample data and opens the demo connection. Only runs in demo mode.
 @MainActor
 enum DemoSeeder {
-    private static func id(_ n: Int) -> UUID {
+    static func id(_ n: Int) -> UUID {
         UUID(uuidString: String(format: "00000000-0000-4000-8000-%012d", n)) ?? UUID()
     }
 
@@ -102,6 +102,17 @@ enum DemoSeeder {
             id: id(302), name: "test.example.org", protocol: .sftp, host: "test.example.org", username: "root",
             source: .quickConnect, lastConnectedAt: ago(9 * day), createdAt: ago(9 * day)))
 
+        // 1Password imports: a password kept in 1Password and an agent key, the first one matched by the import preview.
+        list.append(Connection(
+            id: id(400), name: "Harbor Books web01", protocol: .sftp, host: "harborbooks.example", username: "harbor",
+            authMethods: [.agent, .password], tags: ["harbor"], notes: "Imported from 1Password (Infrastructure)",
+            source: .onePasswordImport, createdAt: ago(12 * day), agentSocket: .onePassword,
+            secretReferences: [.password: "op://Infrastructure/Harbor Books web01/password"], onePasswordItemId: "demo-harbor"))
+        list.append(Connection(
+            id: id(401), name: "Cedar & Pine staging", clientFolderId: folderIDs["Cedar & Pine Law"], protocol: .sftp,
+            host: "staging.cedarpine.example", username: "cedar", authMethods: .agent, notes: "Imported from 1Password (Client Sites)",
+            source: .onePasswordImport, createdAt: ago(12 * day), agentSocket: .onePassword, onePasswordItemId: "demo-cedar"))
+
         try? await app.connections.save(list)
 
         let snippets = [
@@ -196,6 +207,14 @@ enum DemoSeeder {
             if let c = app.allConnections.first(where: { $0.id == id(6) }) { app.editConnection(c, origin: .main) }
         case "importPreview", "importUnsupported", "export", "importExport":
             await app.showImportDemo(DemoMode.screen)
+        case "onePasswordImport":
+            app.presentOnePasswordImport { _ in }
+        case "siteEditor1Password":
+            if let c = app.allConnections.first(where: { $0.id == id(400) }) { app.editConnection(c, origin: .main) }
+        case "healthCheck":
+            await app.seedHealthDemo()
+        case "recentlyRemoved":
+            await app.seedRemovedDemo()
         case "quickLook":
             await app.showQuickLookDemo()
         case "terminal":

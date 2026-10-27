@@ -15,6 +15,7 @@ struct SettingsView: View {
                     LabeledContent("Maximum connections across all sites", value: "\(maxConnections)")
                 }
             }
+            OnePasswordSettingsSection()
             MacSettingsSections()
             Section("Logging") {
                 Toggle("Write a log file for each connection", isOn: $writeLogFiles)

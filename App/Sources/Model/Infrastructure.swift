@@ -55,6 +55,7 @@ extension Error {
         if let rpc = self as? RcloneRPCError { return rpc.message }
         if let export = self as? ExportError { return export.description }
         if let jump = self as? JumpChainError { return jump.description }
+        if let onePassword = self as? OnePasswordError { return onePassword.description }
         return (self as? LocalizedError)?.errorDescription ?? localizedDescription
     }
 }

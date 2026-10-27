@@ -23,10 +23,13 @@ enum DemoMode {
     /// screenshot script does not have to guess which window is the right one.
     static let windowIDFile: String? = UserDefaults.standard.string(forKey: "DockyardWindowIDFile")
 
+    /// Screens that show the Connections window.
+    static var opensManager: Bool { ["connectionManager", "healthCheck", "recentlyRemoved"].contains(screen) }
+
     /// The window the current screen is about.
     static var targetWindow: String {
         switch screen {
-        case "connectionManager": "manager"
+        case "connectionManager", "healthCheck", "recentlyRemoved": "manager"
         case "settings": "settings"
         case "quickLook": "quickLook"
         default: "main"

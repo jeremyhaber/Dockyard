@@ -5,10 +5,13 @@ import SwiftUI
 
 final class ManagerNSTableView: NSTableView {
     var onReturn: ((NSEvent.ModifierFlags) -> Void)?
+    var onDelete: (() -> Void)?
 
     override func keyDown(with event: NSEvent) {
         if event.keyCode == 36 || event.keyCode == 76 {
             onReturn?(event.modifierFlags)
+        } else if event.keyCode == 51 || event.keyCode == 117 {
+            onDelete?()
         } else {
             super.keyDown(with: event)
         }
@@ -66,7 +69,10 @@ struct ManagerActions {
     var connect: (Connection, Bool) -> Void
     var edit: (Connection) -> Void
     var duplicate: (Connection) -> Void
-    var delete: (Connection) -> Void
+    var remove: ([Connection]) -> Void
+    var test: ([Connection]) -> Void
+    var restore: ([Connection]) -> Void
+    var purge: ([Connection]) -> Void
     var toggleFavorite: (Connection) -> Void
     var sideBySide: (Connection) -> Void
     var setMounted: (Connection, Bool) -> Void
@@ -79,6 +85,11 @@ struct ManagerTable: NSViewRepresentable {
     let sourceLabels: [UUID: String]
     @Binding var selection: Set<UUID>
     let actions: ManagerActions
+    var health: [UUID: ConnectionHealth] = [:]
+    var testing: Set<UUID> = []
+    var paused: Set<UUID> = []
+    /// The Recently removed list: no connecting, only Restore and Delete Now.
+    var showsRemoved = false
 
     func makeCoordinator() -> ManagerTableCoordinator { ManagerTableCoordinator() }
 
@@ -126,7 +137,7 @@ final class ManagerTableCoordinator: NSObject, NSTableViewDataSource, NSTableVie
         column("protocol", "Protocol", width: 70)
         column("source", "Source", width: 140)
         column("last", "Last used", width: 110)
-        column("status", "Status", width: 100)
+        column("status", "Status", width: 170)
         table.columnAutoresizingStyle = .firstColumnOnlyAutoresizingStyle
         table.tableColumns[1].resizingMask = .autoresizingMask
         table.sortDescriptors = [NSSortDescriptor(key: "name", ascending: true)]
@@ -135,6 +146,7 @@ final class ManagerTableCoordinator: NSObject, NSTableViewDataSource, NSTableVie
         table.target = self
         table.doubleAction = #selector(doubleClicked)
         table.onReturn = { [weak self] flags in self?.returnPressed(flags) }
+        table.onDelete = { [weak self] in self?.deletePressed() }
         let menu = NSMenu()
         menu.delegate = self
         table.menu = menu
@@ -168,13 +180,14 @@ final class ManagerTableCoordinator: NSObject, NSTableViewDataSource, NSTableVie
         return ascending ? result : result.reversed()
     }
 
-    private func statusRank(_ c: Connection) -> Int {
-        switch parent?.statuses[c.id] {
-        case .connected?: 0
-        case .connecting?, .reconnecting?: 1
-        default: 2
-        }
+    private func statusDisplay(_ c: Connection) -> HealthStatusDisplay? {
+        guard let parent else { return nil }
+        return HealthStatusDisplay.make(
+            connection: c, session: parent.statuses[c.id], health: parent.health[c.id],
+            testing: parent.testing.contains(c.id), paused: parent.paused.contains(c.id))
     }
+
+    private func statusRank(_ c: Connection) -> Int { statusDisplay(c)?.sortRank ?? 4 }
 
     func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
 
@@ -213,6 +226,14 @@ final class ManagerTableCoordinator: NSObject, NSTableViewDataSource, NSTableVie
             if c.removedFromSource { sub.append("removed from WHM") }
             cell.subtitle.stringValue = sub.joined(separator: " \u{00B7} ")
             return cell
+        case "status":
+            let cell = (tableView.makeView(withIdentifier: id, owner: self) as? StatusCellView) ?? {
+                let v = StatusCellView()
+                v.identifier = id
+                return v
+            }()
+            if let display = statusDisplay(c) { cell.apply(display) }
+            return cell
         default:
             let cell = (tableView.makeView(withIdentifier: id, owner: self) as? TextCellView) ?? {
                 let v = TextCellView()
@@ -235,10 +256,6 @@ final class ManagerTableCoordinator: NSObject, NSTableViewDataSource, NSTableVie
                     text = "Never"
                     cell.textField?.textColor = .secondaryLabelColor
                 }
-            case "status":
-                let status = parent.statuses[c.id]
-                text = status?.label ?? "Saved"
-                cell.textField?.textColor = status == nil ? .secondaryLabelColor : .labelColor
             default: break
             }
             cell.textField?.stringValue = text
@@ -285,11 +302,18 @@ final class ManagerTableCoordinator: NSObject, NSTableViewDataSource, NSTableVie
     }
 
     @objc private func doubleClicked() {
-        guard let table, table.clickedRow >= 0, table.clickedRow < rows.count else { return }
+        guard parent?.showsRemoved != true, let table, table.clickedRow >= 0, table.clickedRow < rows.count else { return }
         parent?.actions.connect(rows[table.clickedRow], NSEvent.modifierFlags.contains(.command))
     }
 
+    private func deletePressed() {
+        let list = selectedConnections()
+        guard !list.isEmpty else { return }
+        if parent?.showsRemoved == true { parent?.actions.purge(list) } else { parent?.actions.remove(list) }
+    }
+
     private func returnPressed(_ flags: NSEvent.ModifierFlags) {
+        guard parent?.showsRemoved != true else { return }
         if flags.contains(.option) {
             for c in selectedConnections() { parent?.actions.sideBySide(c) }
             return
@@ -310,6 +334,12 @@ final class ManagerTableCoordinator: NSObject, NSTableViewDataSource, NSTableVie
             item.isEnabled = has
             menu.addItem(item)
         }
+        if parent?.showsRemoved == true {
+            add("Restore", #selector(menuRestore))
+            menu.addItem(.separator())
+            add("Delete Now\u{2026}", #selector(menuPurge))
+            return
+        }
         add("Connect", #selector(menuConnect))
         add("Open in New Tab", #selector(menuConnectNewTab))
         add("Open Side by Side", #selector(menuSideBySide))
@@ -320,7 +350,8 @@ final class ManagerTableCoordinator: NSObject, NSTableViewDataSource, NSTableVie
         let mounted = selectedConnections().first?.mountInFinder ?? false
         add(mounted ? "Unmount from Finder" : "Mount in Finder", #selector(menuMount))
         menu.addItem(.separator())
-        add("Delete\u{2026}", #selector(menuDelete))
+        add("Test", #selector(menuTest))
+        add("Remove\u{2026}", #selector(menuRemove))
     }
 
     @objc private func menuConnect() { for c in selectedConnections() { parent?.actions.connect(c, false) } }
@@ -333,13 +364,8 @@ final class ManagerTableCoordinator: NSObject, NSTableViewDataSource, NSTableVie
     @objc private func menuDuplicate() { if let c = selectedConnections().first { parent?.actions.duplicate(c) } }
     @objc private func menuFavorite() { for c in selectedConnections() { parent?.actions.toggleFavorite(c) } }
 
-    @objc private func menuDelete() {
-        let list = selectedConnections()
-        guard !list.isEmpty else { return }
-        let what = list.count == 1 ? "\"\(list[0].name)\"" : "\(list.count) connections"
-        guard Dialogs.confirm(
-            title: "Delete \(what)?", message: "Saved passwords for \(list.count == 1 ? "it" : "them") are removed from your Keychain.",
-            confirm: "Delete") else { return }
-        for c in list { parent?.actions.delete(c) }
-    }
+    @objc private func menuTest() { parent?.actions.test(selectedConnections()) }
+    @objc private func menuRemove() { parent?.actions.remove(selectedConnections()) }
+    @objc private func menuRestore() { parent?.actions.restore(selectedConnections()) }
+    @objc private func menuPurge() { parent?.actions.purge(selectedConnections()) }
 }

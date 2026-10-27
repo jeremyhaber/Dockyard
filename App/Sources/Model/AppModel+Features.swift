@@ -19,12 +19,22 @@ struct UndoTarget: Equatable {
     var side: PaneSide
 }
 
+/// A button on a toast that is not a journal undo, such as restoring removed connections.
+struct ToastAction: Equatable {
+    let id = UUID()
+    var title: String
+    var perform: @MainActor () -> Void
+
+    static func == (lhs: ToastAction, rhs: ToastAction) -> Bool { lhs.id == rhs.id }
+}
+
 struct Toast: Identifiable, Equatable {
     let id = UUID()
     var text: String
     var symbol = "checkmark.circle"
     var isError = false
     var undo: UndoTarget?
+    var action: ToastAction?
 }
 
 // MARK: - Root browsing
@@ -72,7 +82,7 @@ extension AppModel {
         let flag = "secretsMigratedToKeychainGroup"
         guard AppGroup.keychainAccessGroup != nil, !UserDefaults.standard.bool(forKey: flag) else { return }
         let legacy = FileSystemFactory.legacySecretStore()
-        let target = secrets
+        let target = keychainSecrets
         let repository = connections
         Task {
             guard let all = try? await repository.fetch(.all) else { return }
@@ -150,11 +160,13 @@ extension AppModel {
 // MARK: - Toasts
 
 extension AppModel {
-    func showToast(_ text: String, symbol: String = "checkmark.circle", isError: Bool = false, undo: UndoTarget? = nil) {
-        let toast = Toast(text: text, symbol: symbol, isError: isError, undo: undo)
+    func showToast(
+        _ text: String, symbol: String = "checkmark.circle", isError: Bool = false, undo: UndoTarget? = nil, action: ToastAction? = nil
+    ) {
+        let toast = Toast(text: text, symbol: symbol, isError: isError, undo: undo, action: action)
         toasts.append(toast)
         Task {
-            let seconds: UInt64 = DemoMode.isEnabled ? 120 : (undo == nil ? 4 : 9)
+            let seconds: UInt64 = DemoMode.isEnabled ? 120 : (undo == nil && action == nil ? 4 : 9)
             try? await Task.sleep(nanoseconds: seconds * 1_000_000_000)
             toasts.removeAll { $0.id == toast.id }
         }

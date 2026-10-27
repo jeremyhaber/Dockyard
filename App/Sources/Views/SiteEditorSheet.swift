@@ -22,23 +22,32 @@ struct SiteEditorSheet: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Form {
-                generalSection
-                if draft.protocolChoice == .cloud {
-                    cloudSection
-                } else if draft.protocolChoice == .sftp {
-                    JumpHostSection(draft: $draft)
-                    authSection
-                    elevationSection
-                } else {
-                    Section("Authentication") {
-                        SecureField("Password", text: $draft.password, prompt: Text(hasStoredPassword ? "Saved in Keychain" : "Optional, asked on connect"))
+            ScrollViewReader { proxy in
+                Form {
+                    generalSection
+                    if draft.protocolChoice == .cloud {
+                        cloudSection
+                    } else if draft.protocolChoice == .sftp {
+                        JumpHostSection(draft: $draft)
+                        authSection.id("authentication")
+                        elevationSection
+                    } else {
+                        Section("Authentication") {
+                            SecretSourceField(
+                                draft: $draft, purpose: .password, title: "Password",
+                                keychainPrompt: hasStoredPassword ? "Saved in Keychain" : "Optional, asked on connect")
+                        }
                     }
+                    finderSection
+                    otherSection
                 }
-                finderSection
-                otherSection
+                .formStyle(.grouped)
+                .task {
+                    guard DemoMode.isEnabled, DemoMode.screen == "siteEditor1Password" else { return }
+                    try? await Task.sleep(nanoseconds: 600_000_000)
+                    proxy.scrollTo("authentication", anchor: .top)
+                }
             }
-            .formStyle(.grouped)
             Divider()
             buttons
         }
@@ -80,17 +89,20 @@ struct SiteEditorSheet: View {
     private var authSection: some View {
         Section("Authentication") {
             Toggle("SSH agent", isOn: $draft.useAgent)
+            if draft.useAgent { AgentSocketPicker(draft: $draft) }
             Toggle("SSH key", isOn: $draft.useKey)
             if draft.useKey {
                 HStack {
                     TextField("Key file", text: $draft.keyPath, prompt: Text("~/.ssh/id_ed25519"))
                     Button("Choose\u{2026}") { chooseKey() }
                 }
-                SecureField("Key passphrase", text: $draft.keyPassphrase, prompt: Text("Only if the key is encrypted"))
+                SecretSourceField(draft: $draft, purpose: .keyPassphrase, title: "Key passphrase", keychainPrompt: "Only if the key is encrypted")
             }
             Toggle(draft.useKey ? "Password too" : "Password", isOn: $draft.usePassword)
             if draft.usePassword {
-                SecureField("Password", text: $draft.password, prompt: Text(hasStoredPassword ? "Saved in Keychain" : "Asked on first connect if empty"))
+                SecretSourceField(
+                    draft: $draft, purpose: .password, title: "Password",
+                    keychainPrompt: hasStoredPassword ? "Saved in Keychain" : "Asked on first connect if empty")
             }
             if draft.useKey && draft.usePassword {
                 Text("The key is tried first, then the password answers the server's prompt.")
@@ -107,7 +119,7 @@ struct SiteEditorSheet: View {
                 Text("sudo -i").tag(Elevation.sudo)
             }
             if draft.elevation != .none {
-                SecureField("Elevation password", text: $draft.elevationPassword, prompt: Text("Stored in Keychain"))
+                SecretSourceField(draft: $draft, purpose: .elevationPassword, title: "Elevation password", keychainPrompt: "Stored in Keychain")
                 Toggle("Also browse files as root", isOn: $draft.elevateFileBrowsing)
                 Toggle("Ask before elevating on PROD sites", isOn: $draft.askBeforeElevatingOnProd)
             }

@@ -67,7 +67,14 @@ actor MountContext {
     }
 
     private func makeFileSystem(_ c: Connection) throws -> any RemoteFileSystem {
-        let secrets = KeychainSecretStore(accessGroup: AppGroup.keychainAccessGroup, useDataProtectionKeychain: true)
+        let keychain = KeychainSecretStore(accessGroup: AppGroup.keychainAccessGroup, useDataProtectionKeychain: true)
+        // A secret that lives in 1Password is read with `op`. The sandbox may stop the extension from running it,
+        // in which case a Keychain copy (if any) is used.
+        var references = [c.id: c.secretReferences]
+        for hop in jumpChain { references[hop.id] = hop.secretReferences }
+        let secrets = ResolvingSecretStore(
+            fallback: keychain, references: StaticSecretReferences(references), resolver: OnePasswordCLI(),
+            options: ResolvingSecretStore.Options(cacheTTL: 30))
         let config = MountPolicy.config(for: c)
         switch c.protocol {
         case .sftp:

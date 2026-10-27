@@ -42,3 +42,11 @@ By default nothing is cached. `ResolvingSecretStore.Options(cacheTTL:)` keeps re
 - Secret values are never written to SQLite, the log stream or disk. `OnePasswordCLI` logs only the subcommand (`op read` is logged without its reference), error messages come from `op`'s stderr only, and item/field `description`s hide concealed values.
 - `op` talks to the desktop app, which decides what to unlock. Dockyard passes arguments as an argv array (no shell) and refuses references that do not start with `op://`.
 - Copy-to-Keychain reads each password once during import and then behaves like any Keychain secret.
+
+## In the app
+
+- **Settings, 1Password**: CLI status (installed, integration on, unlocked) with a checklist and Retry when it is not ready, and whether the agent socket exists.
+- **Connections, Import, 1Password...**: pick vaults, read the items with progress, review (new, updated, already saved, warnings, SSH keys found) and choose the client folder (none, vault, first tag), "Keep passwords in 1Password" or "Copy into Keychain", and "Use 1Password SSH agent for SFTP". The options re-map the items already read. The sidebar shows a 1Password row once something was imported; its context menu and banner offer Re-import.
+- **Site editor**: each secret (password, key passphrase, elevation password) has a "from" menu, Keychain or 1Password. A reference is validated with `OnePasswordCLI.isValidReference`; Choose... walks vault, item, field and inserts the reference. "SSH agent" has an Agent menu: System, 1Password, Custom path.
+- Resolved secrets stay in memory for 10 seconds (shared by concurrent connects), and `flushCache()` runs on sleep, screen lock and when a connection is saved.
+- Finder mounts try `op` from the sandboxed extension; if the sandbox blocks it, a Keychain copy is used when there is one (choose "Copy into Keychain" for mounted sites).

@@ -84,6 +84,9 @@ extension AppModel {
             return try await secrets.secret(for: connection, purpose: purpose)
         } catch AppError.cancelled {
             throw AppError.cancelled
+        } catch let error as OnePasswordError {
+            // A reference 1Password cannot resolve must not turn into a password prompt that hides it.
+            throw error
         } catch {
             return nil
         }

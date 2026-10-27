@@ -19,6 +19,9 @@ extension AppModel {
         for (purpose, value) in draft.secretsToStore {
             try await secrets.setSecret(value, for: saved.id, purpose: purpose)
         }
+        // An edit can change anything a test result or a resolved secret was based on.
+        forgetHealth(of: [saved.id])
+        flushSecretCache()
         if let session = session(for: saved.id) { session.updateConnection(saved) }
         return saved
     }
@@ -32,21 +35,26 @@ extension AppModel {
         let log = LogBuffer(capacity: 200)
         do {
             let connection = try draft.connection()
-            let store = InMemorySecretStore()
+            let memory = InMemorySecretStore()
             for purpose in SecretPurpose.allCases {
-                if let value = try? await secrets.secret(for: connection.id, purpose: purpose) {
-                    await store.setSecret(value, for: connection.id, purpose: purpose)
+                if let value = try? await keychainSecrets.secret(for: connection.id, purpose: purpose) {
+                    await memory.setSecret(value, for: connection.id, purpose: purpose)
                 }
             }
             for (purpose, value) in draft.secretsToStore {
-                await store.setSecret(value, for: connection.id, purpose: purpose)
+                await memory.setSecret(value, for: connection.id, purpose: purpose)
             }
+            // The draft's references, not the saved ones, decide where the test reads from.
+            let store = ResolvingSecretStore(
+                fallback: memory, references: StaticSecretReferences([connection.id: connection.secretReferences]),
+                resolver: onePassword.cli)
             if connection.protocol == .rclone, let cloud = connection.cloud,
                RcloneBackend(rawValue: cloud.backend)?.usesOAuth == true,
-               (await store.secret(for: connection.id, purpose: .cloudToken)) == nil {
+               (await memory.secret(for: connection.id, purpose: .cloudToken)) == nil {
                 return ConnectionTestResult(success: false, message: "Save and connect once to authorise this account in your browser.")
             }
-            if usesPassword(connection), (await store.secret(for: connection.id, purpose: .password)) == nil {
+            if usesPassword(connection), connection.secretReferences[.password] == nil,
+               (await memory.secret(for: connection.id, purpose: .password)) == nil {
                 return ConnectionTestResult(success: false, message: "Enter a password to test the connection.")
             }
             let validator = hostKeyValidator(host: connection.host, port: connection.port, log: log)

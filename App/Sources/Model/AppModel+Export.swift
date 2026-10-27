@@ -24,11 +24,11 @@ extension AppModel {
 
     /// Collects everything, seals it with the passphrase (key derivation is slow, so off the main actor) and writes `url`.
     func exportConnections(to url: URL, passphrase: String, includePasswords: Bool) async throws -> ExportPreviewCounts {
-        let collector = ExportCollector(connections: connections, folders: folders, whmSources: whmSources, secrets: secrets)
+        let collector = ExportCollector(connections: connections, folders: folders, whmSources: whmSources, secrets: keychainSecrets)
         var contents = try await collector.collect(includeSecrets: includePasswords, settings: SettingsTransfer.collect())
         if includePasswords {
             for source in contents.whmSources {
-                if let token = try await secrets.secret(for: source.id, purpose: .cloudToken), !token.isEmpty {
+                if let token = try await keychainSecrets.secret(for: source.id, purpose: .cloudToken), !token.isEmpty {
                     contents.whmTokens[source.apiTokenKeychainRef] = token
                 }
             }
@@ -47,12 +47,12 @@ extension AppModel {
     /// Merges an opened export. Existing connections win; secrets are only restored for connections this import created.
     func mergeExport(_ contents: ExportContents) async throws -> ExportImportReport {
         let existingSources = Set(try await whmSources.all().map(\.id))
-        let merger = ExportMerger(connections: connections, folders: folders, whmSources: whmSources, secrets: secrets)
+        let merger = ExportMerger(connections: connections, folders: folders, whmSources: whmSources, secrets: keychainSecrets)
         var report = ExportImportReport(merge: try await merger.merge(contents))
         let nowSources = Set(try await whmSources.all().map(\.id))
         for source in contents.whmSources where !existingSources.contains(source.id) && nowSources.contains(source.id) {
             guard let token = contents.whmTokens[source.apiTokenKeychainRef] else { continue }
-            try await WHMSyncService.storeToken(token, for: source, in: secrets)
+            try await WHMSyncService.storeToken(token, for: source, in: keychainSecrets)
             report.whmTokensRestored += 1
         }
         report.settingsApplied = SettingsTransfer.apply(contents.settings)
