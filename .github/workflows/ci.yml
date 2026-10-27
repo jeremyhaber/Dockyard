@@ -24,3 +24,18 @@ jobs:
             (cd "$pkg" && swift build --build-tests && swift test)
             echo "::endgroup::"
           done
+
+  librclone-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+      - name: Build universal librclone
+        run: scripts/build-librclone.sh shared
+      - name: Check architectures
+        run: lipo -info build/librclone/librclone.dylib
+      - name: RcloneKit tests with the real library
+        working-directory: Packages/RcloneKit
+        run: DOCKYARD_LIBRCLONE="$GITHUB_WORKSPACE/build/librclone/librclone.dylib" swift test
