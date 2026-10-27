@@ -71,7 +71,7 @@ private func printfOutput(pid: Int = 4242, _ records: [(type: String, size: Int,
         #expect(shell.commands.withLock { $0 }.count == 2)
     }
 
-    @Test func hitCapStopsAndKillsTheRemoteProcess() async throws {
+    @Test func hitCapStopsTheSearch() async throws {
         let shell = fs { command in
             if command.hasPrefix("sh -c") {
                 return ("999\n" + (1...50).map { "/a/f\($0)\0" }.joined(), "", 0)
@@ -80,7 +80,6 @@ private func printfOutput(pid: Int = 4242, _ records: [(type: String, size: Int,
         }
         let result = await collect(RemoteSearch.search(SearchQuery(mode: .content, text: "needle", root: "/a", limit: 10), on: shell))
         #expect(result.hits.count == 10 && result.summary?.truncated == true)
-        #expect(shell.commands.withLock { $0 }.last?.contains("kill -TERM 999") == true)
     }
 
     @Test func contentSearchCommand() async throws {

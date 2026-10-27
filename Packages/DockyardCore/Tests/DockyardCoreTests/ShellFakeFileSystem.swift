@@ -65,7 +65,7 @@ final class ScriptedShellFileSystem: ShellFakeFileSystem, RemoteCommandRunner, @
         return SSHExecResult(stdout: Data(reply.stdout.utf8), stderr: Data(reply.stderr.utf8), exitStatus: reply.status)
     }
 
-    func execStream(_ command: String) async throws -> AsyncThrowingStream<SSHExecEvent, Error> {
+    func execStream(_ command: String, elevated: Bool) async throws -> AsyncThrowingStream<SSHExecEvent, Error> {
         let result = try await exec(command)
         return AsyncThrowingStream { continuation in
             if !result.stdout.isEmpty { continuation.yield(.stdout(result.stdout)) }

@@ -47,7 +47,7 @@ public struct TransferSnapshot: Sendable, Equatable {
 }
 
 /// Selects rows for `TransferQueue.page` and `count`.
-public struct TransferFilter: Sendable, Equatable {
+public struct TransferJobFilter: Sendable, Equatable {
     public enum Scope: Sendable, Equatable {
         /// Files only (no folder jobs): what a flat queue table shows.
         case files

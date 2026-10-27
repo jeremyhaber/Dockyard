@@ -134,13 +134,13 @@ private func makeQueue(_ env: TransferEnv, database: DockyardDatabase? = nil, pr
         // The first transfer is under way while most folders have not been listed yet.
         let lists = server.files.calls.filter { $0.hasPrefix("list") }.count
         #expect(lists <= 3)
-        let known = await q.count(TransferFilter(scope: .all))
+        let known = await q.count(TransferJobFilter(scope: .all))
         #expect(known < 40 * 20)
         #expect(await q.job(id)?.state == .running)
         await gate.open()
         await q.waitUntilIdle()
         #expect(await q.snapshot().completedCount == 800)
-        #expect(await q.count(TransferFilter(scope: .files, states: [.completed])) == 800)
+        #expect(await q.count(TransferJobFilter(scope: .files, states: [.completed])) == 800)
     }
 
     @Test func pagingFiltersAndCounts() async throws {
@@ -159,14 +159,14 @@ private func makeQueue(_ env: TransferEnv, database: DockyardDatabase? = nil, pr
         await q.waitUntilIdle()
 
         #expect(await q.count() == 250)
-        #expect(await q.count(TransferFilter(states: [.failed])) == 50)
-        #expect(await q.count(TransferFilter(states: [.completed])) == 200)
+        #expect(await q.count(TransferJobFilter(states: [.failed])) == 50)
+        #expect(await q.count(TransferJobFilter(states: [.completed])) == 200)
         let page = await q.page(offset: 100, limit: 25)
         #expect(page.map(\.id) == Array(ids[100..<125]))
-        let failed = await q.page(offset: 10, limit: 100, filter: TransferFilter(states: [.failed]))
+        let failed = await q.page(offset: 10, limit: 100, filter: TransferJobFilter(states: [.failed]))
         #expect(failed.count == 40 && failed.allSatisfy { $0.state == .failed && $0.error != nil })
         #expect(await q.page(offset: 400, limit: 10).isEmpty)
-        #expect(await q.page(offset: 0, limit: 10, filter: TransferFilter(scope: .topLevel)).count == 10)
+        #expect(await q.page(offset: 0, limit: 10, filter: TransferJobFilter(scope: .topLevel)).count == 10)
     }
 
     @Test func bulkOperations() async throws {
@@ -201,7 +201,7 @@ private func makeQueue(_ env: TransferEnv, database: DockyardDatabase? = nil, pr
         await q.waitUntilIdle()
         #expect(await q.snapshot().failedCount == 0)
         await q.removeFinished()
-        #expect(await q.count(TransferFilter(scope: .all)) == 60)  // the cancelled ones remain
+        #expect(await q.count(TransferJobFilter(scope: .all)) == 60)  // the cancelled ones remain
         _ = ids
     }
 }

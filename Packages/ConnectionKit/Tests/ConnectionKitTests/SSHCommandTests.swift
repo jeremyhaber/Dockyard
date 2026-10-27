@@ -53,7 +53,7 @@ private func connected(elevation: Elevation = .none, password: String = Env.root
 
 private final class Collected: Sendable {
     private let state = LockedBox((out: Data(), err: Data()))
-    func add(_ stream: ExecStream, _ data: Data) { state.withLock { if stream == .stdout { $0.out.append(data) } else { $0.err.append(data) } } }
+    func add(_ isStderr: Bool, _ data: Data) { state.withLock { if !isStderr { $0.out.append(data) } else { $0.err.append(data) } } }
     var stdout: String { String(decoding: state.withLock { $0.out }, as: UTF8.self) }
     var stderr: String { String(decoding: state.withLock { $0.err }, as: UTF8.self) }
 }

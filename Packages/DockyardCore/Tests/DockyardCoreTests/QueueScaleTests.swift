@@ -107,7 +107,7 @@ import ConnectionKit
         print("SCALE singles: enqueue loop \(String(format: "%.1f", enqueueTime)) s, first transfer \(Int(first * 1000)) ms, "
               + "total \(String(format: "%.1f", total)) s, memory \(memoryBefore.map(megabytes) ?? -1) -> \(memoryQueued.map(megabytes) ?? -1) MB")
         if let before = memoryBefore, let after = memoryQueued { #expect(megabytes(after) - megabytes(before) < 300) }
-        #expect(await q.count(TransferFilter(states: [.completed])) == 100_000)
+        #expect(await q.count(TransferJobFilter(states: [.completed])) == 100_000)
     }
 
     @Test func pagingStaysFastWithHugeQueues() async throws {

@@ -50,11 +50,11 @@ public final class ArchiveService: Sendable {
 
     // MARK: Entry points
 
-    public func compress(_ request: CompressRequest, on fs: any RemoteFileSystem & CommandRunning) async throws -> ArchiveResult {
+    public func compress(_ request: CompressRequest, on fs: any RemoteFileSystem & RemoteCommandRunner) async throws -> ArchiveResult {
         try await compress(request, host: RemoteArchiveHost(fs: fs, runner: fs, elevated: await fs.canElevateCommands))
     }
 
-    public func extract(_ request: ExtractRequest, on fs: any RemoteFileSystem & CommandRunning) async throws -> ArchiveResult {
+    public func extract(_ request: ExtractRequest, on fs: any RemoteFileSystem & RemoteCommandRunner) async throws -> ArchiveResult {
         try await extract(request, host: RemoteArchiveHost(fs: fs, runner: fs, elevated: await fs.canElevateCommands))
     }
 

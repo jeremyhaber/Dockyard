@@ -269,16 +269,16 @@ extension TransferQueue {
 
     /// All direct children. For large folders use `page(offset:limit:filter:)` with `.children(of:)`.
     public func children(of id: UUID) async -> [TransferJobInfo] {
-        await page(offset: 0, limit: Int.max, filter: TransferFilter(scope: .children(of: id)))
+        await page(offset: 0, limit: Int.max, filter: TransferJobFilter(scope: .children(of: id)))
     }
 
     /// One page of rows in the order they were added, straight from SQLite.
-    public func page(offset: Int, limit: Int, filter: TransferFilter = TransferFilter()) async -> [TransferJobInfo] {
+    public func page(offset: Int, limit: Int, filter: TransferJobFilter = TransferJobFilter()) async -> [TransferJobInfo] {
         await flushNow()
         return await fetchPage(offset: offset, limit: limit, filter: filter)
     }
 
-    func fetchPage(offset: Int, limit: Int, filter: TransferFilter) async -> [TransferJobInfo] {
+    func fetchPage(offset: Int, limit: Int, filter: TransferJobFilter) async -> [TransferJobInfo] {
         let (clause, arguments) = Self.whereClause(filter)
         let sql = "SELECT \(JobRecord.columns) FROM transferJob WHERE \(clause) ORDER BY id LIMIT ? OFFSET ?"
         let args = arguments + [min(limit, Int(Int32.max)), max(0, offset)]
@@ -289,7 +289,7 @@ extension TransferQueue {
     }
 
     /// Number of rows `page` would return in total.
-    public func count(_ filter: TransferFilter = TransferFilter()) async -> Int {
+    public func count(_ filter: TransferJobFilter = TransferJobFilter()) async -> Int {
         await flushNow()
         let (clause, arguments) = Self.whereClause(filter)
         return (try? await writer.read { db in
@@ -297,7 +297,7 @@ extension TransferQueue {
         }).flatMap { $0 } ?? 0
     }
 
-    private static func whereClause(_ filter: TransferFilter) -> (String, StatementArguments) {
+    private static func whereClause(_ filter: TransferJobFilter) -> (String, StatementArguments) {
         var parts: [String] = []
         var arguments = StatementArguments()
         switch filter.scope {

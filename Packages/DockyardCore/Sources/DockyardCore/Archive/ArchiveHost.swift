@@ -34,15 +34,15 @@ struct LineSplitter {
 
 struct RemoteArchiveHost: ArchiveHost {
     let fs: any RemoteFileSystem
-    let runner: any CommandRunning
+    let runner: any RemoteCommandRunner
     let elevated: Bool
     var place: String { "on the server" }
 
     func availableTools(_ names: [String]) async throws -> Set<String> {
         let probe = "for t in \(names.joined(separator: " ")); do command -v \"$t\" >/dev/null 2>&1 && echo \"$t\"; done; true"
         let collected = LockedBox(Data())
-        _ = try await runner.runCommand(probe, elevated: false) { stream, data in
-            if stream == .stdout { collected.withLock { $0.append(data) } }
+        _ = try await runner.runCommand(probe, elevated: false) { isStderr, data in
+            if !isStderr { collected.withLock { $0.append(data) } }
         }
         let text = String(decoding: collected.withLock { $0 }, as: UTF8.self)
         return Set(text.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) })

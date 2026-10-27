@@ -68,7 +68,7 @@ extension TransferQueue {
             s.currentIsRelay = first.record.isRelay
             s.currentName = first.record.name
         }
-        s.jobs = await fetchPage(offset: 0, limit: topLevelPreviewLimit, filter: TransferFilter(scope: .topLevel))
+        s.jobs = await fetchPage(offset: 0, limit: topLevelPreviewLimit, filter: TransferJobFilter(scope: .topLevel))
         return s
     }
 
