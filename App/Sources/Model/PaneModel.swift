@@ -10,6 +10,7 @@ enum PaneSide: String, Sendable, Hashable, Codable {
 /// One pane: folder tabs, the current listing and the lazy folder tree over one file system.
 @MainActor @Observable
 final class PaneModel {
+    let id = UUID()
     let side: PaneSide
     let fs: any RemoteFileSystem
     let home: String
@@ -26,6 +27,7 @@ final class PaneModel {
     /// Bumped by ⌘L / ⌘G and ⌘Y so the path bar reacts.
     private(set) var pathEditToken = 0
     private(set) var historyToken = 0
+    private(set) var recentToken = 0
 
     @ObservationIgnored var selection: [FileRow] = []
     @ObservationIgnored var onStateChange: (() -> Void)?
@@ -235,6 +237,7 @@ final class PaneModel {
 
     func requestPathEdit() { pathEditToken += 1 }
     func requestHistory() { historyToken += 1 }
+    func requestRecentChanges() { recentToken += 1 }
 
     // MARK: Session
 

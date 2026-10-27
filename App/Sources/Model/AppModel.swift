@@ -52,12 +52,16 @@ final class AppModel {
     let history: FolderHistoryRepository
     let whmSources: WHMSourceRepository
     let knownHosts: KnownHostRepository
+    let snippets: SnippetRepository
+    let journal: ChangeJournal
     let secrets: any SecretStore
     let quickConnectService: QuickConnectService
     let sessionService: SessionService
     let whmSync: WHMSyncService
     let queue: TransferQueue
     let prompts: PromptCenter
+    let edits = EditCenter()
+    let mounts = MountService()
     private(set) var startupError: String?
 
     private(set) var sessions: [ConnectionSession] = []
@@ -77,8 +81,23 @@ final class AppModel {
     private(set) var quickConnectFocusToken = 0
     private(set) var quickHistory: [QuickConnectHistoryEntry] = []
 
-    @ObservationIgnored private var whmScheduler: WHMSyncScheduler?
+    var layoutMode: LayoutMode = .localServer
+    /// Session ids shown as columns in the side-by-side layout.
+    var columnIDs: [UUID] = []
+    var localRailExpanded = false
+    var dropHint: DropHint?
+    var compareVisible = false
+    var toasts: [Toast] = []
+    /// Menu titles for the change the next ⌘Z or ⇧⌘Z would undo or redo.
+    var undoLabel: String?
+    var redoLabel: String?
+    @ObservationIgnored var pendingJournal: [UUID: PendingChange] = [:]
+
+    @ObservationIgnored var whmScheduler: WHMSyncScheduler?
     @ObservationIgnored private var wasIdle = true
+    @ObservationIgnored var lastMountSpecs: [MountDomainSpec]?
+    @ObservationIgnored var lastAppliedMaxConnections = 0
+    @ObservationIgnored var lastAppliedWHMInterval: TimeInterval = 0
 
     private init() {
         var startup: String?
@@ -86,6 +105,7 @@ final class AppModel {
         let demo = DemoMode.isEnabled
         do {
             if demo { throw AppError.cancelled }
+            AppPaths.migrateDatabaseIfNeeded()
             try FileManager.default.createDirectory(at: AppPaths.supportDirectory, withIntermediateDirectories: true)
             db = try DockyardDatabase(path: AppPaths.databaseURL.path)
         } catch {
@@ -107,18 +127,23 @@ final class AppModel {
         let sources = WHMSourceRepository(database: db)
         self.whmSources = sources
         self.knownHosts = KnownHostRepository(database: db)
+        self.snippets = SnippetRepository(database: db)
+        self.journal = ChangeJournal(database: db)
         self.secrets = secrets
         self.quickConnectService = QuickConnectService(repository: repo, secrets: secrets)
         self.sessionService = SessionService(repository: sessionRepo, saver: SessionSaver(repository: sessionRepo))
         self.whmSync = WHMSyncService(repository: repo, sources: sources, secrets: secrets)
         self.prompts = prompts
-        self.queue = TransferQueue(maxConcurrent: demo ? 1 : 3, conflictPolicy: .ask, resolver: { info in await prompts.askConflict(info) })
+        self.queue = TransferQueue(
+            maxConcurrent: demo ? 1 : AppSettings.maxConnections, conflictPolicy: .ask,
+            resolver: { info in await prompts.askConflict(info) })
         self.startupError = startup
         startObserving()
         if demo {
             Task { await DemoSeeder.run(self) }
         } else {
             startWHMScheduler()
+            migrateSecretsIfNeeded()
         }
     }
 
@@ -151,6 +176,12 @@ final class AppModel {
                 self.allConnections = list
                 self.connectionsRevision += 1
                 self.refreshOpenConnectionRecords(list)
+                self.reconcileMounts(list)
+            }
+        }
+        if !DemoMode.isEnabled {
+            NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.applySettings() }
             }
         }
         Task { [weak self] in
@@ -169,6 +200,8 @@ final class AppModel {
             }
         }
         Task { [weak self] in await self?.reloadQuickHistory() }
+        edits.onEvent = { [weak self] event in self?.handleEdit(event) }
+        edits.start()
     }
 
     private func refreshOpenConnectionRecords(_ list: [Connection]) {
@@ -182,6 +215,7 @@ final class AppModel {
 
     private func handle(_ snapshot: TransferSnapshot) {
         transfers = snapshot
+        journalCompletedTransfers(snapshot)
         let idle = snapshot.isIdle
         if idle && !wasIdle {
             for session in sessions { session.refreshPanes() }
@@ -198,7 +232,7 @@ final class AppModel {
 
     private func startWHMScheduler() {
         let sync = whmSync
-        let scheduler = WHMSyncScheduler(action: { _ = await sync.syncAll() })
+        let scheduler = WHMSyncScheduler(interval: AppSettings.whmSyncInterval, action: { _ = await sync.syncAll() })
         whmScheduler = scheduler
         Task { await scheduler.start() }
     }
@@ -257,10 +291,24 @@ final class AppModel {
         }
     }
 
+    /// Reconnects with the SFTP subsystem started as root ("Browse files as root" in the terminal bar).
+    func browseAsRoot(_ session: ConnectionSession) {
+        session.rootBrowsingOverride = true
+        session.connectTask?.cancel()
+        session.connectTask = Task { [weak self] in
+            guard let self else { return }
+            await self.flush(session)
+            await self.edits.stopAll(connectionID: session.connection.id)
+            await session.teardown()
+            await self.connect(session, initialPath: nil, skipRestore: false)
+        }
+    }
+
     func disconnect(_ session: ConnectionSession) {
         session.connectTask?.cancel()
         Task {
             await flush(session)
+            await edits.stopAll(connectionID: session.connection.id)
             await session.teardown()
             session.markDisconnected()
             session.log.append(.status, "Disconnected")
@@ -271,7 +319,9 @@ final class AppModel {
         session.connectTask?.cancel()
         Task {
             await flush(session)
+            await edits.stopAll(connectionID: session.connection.id)
             await session.teardown()
+            columnIDs.removeAll { $0 == session.id }
             sessions.removeAll { $0.id == session.id }
             if !sessions.contains(where: { $0.connection.id == session.connection.id }) {
                 connections.openConnections.close(session.connection.id)
@@ -311,7 +361,9 @@ final class AppModel {
                 try await ensureCredentials(for: session, forcePrompt: attempt > 1)
                 try Task.checkCancellation()
                 let validator = hostKeyValidator(host: session.connection.host, port: session.connection.port, log: session.log)
-                let fs = try FileSystemFactory.make(for: session.connection, secrets: secrets, hostKeyValidator: validator)
+                let asRoot = await shouldBrowseAsRoot(session)
+                let fs = try FileSystemFactory.make(
+                    for: session.connection, secrets: secrets, hostKeyValidator: validator, browseAsRoot: asRoot)
                 session.attach(fs)
                 try await fs.connect()
                 try Task.checkCancellation()
@@ -348,8 +400,9 @@ final class AppModel {
     private func finishConnect(_ session: ConnectionSession, fs: any RemoteFileSystem, initialPath: String?, skipRestore: Bool) async {
         let c = session.connection
         try? await connections.markConnected(c.id)
+        session.setBrowsingAsRoot(await Self.isBrowsingAsRoot(fs))
         let home = (try? await fs.homeDirectory()) ?? "/"
-        var localHome = NSHomeDirectory()
+        var localHome = AppSettings.localFolder ?? NSHomeDirectory()
         if let folder = c.localFolder, !folder.isEmpty, FileManager.default.fileExists(atPath: folder) { localHome = folder }
         let serverStart = initialPath ?? c.initialRemotePath ?? home
         let rules = FileSystemFactory.rules(for: c)
@@ -381,6 +434,7 @@ final class AppModel {
         let history = self.history
         let id = c.id
         server.onVisit = { path in Task { try? await history.record(connectionId: id, path: path) } }
+        session.rootBrowsingOverride = false
         session.install(local: local, server: server, notice: restored?.notice)
         server.start(expanded: serverExpanded)
         local.start(expanded: localExpanded)

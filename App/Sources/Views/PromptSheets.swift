@@ -10,7 +10,39 @@ struct PromptSheet: View {
         case .conflict(let request): ConflictSheet(request: request)
         case .password(let request): PasswordSheet(request: request)
         case .hostKey(let request): HostKeySheet(request: request)
+        case .confirm(let request): ConfirmSheet(request: request)
         }
+    }
+}
+
+struct ConfirmSheet: View {
+    @Environment(AppModel.self) private var app
+    let request: ConfirmRequest
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: request.symbol)
+                    .font(.system(size: 26))
+                    .foregroundStyle(Palette.statusAmber)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(request.title).font(.headline)
+                    Text(request.message).foregroundStyle(Palette.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            HStack {
+                Spacer()
+                Button(request.cancelTitle) { app.prompts.resolveConfirm(request.id, confirmed: false) }
+                    .keyboardShortcut(.cancelAction)
+                Button(request.confirmTitle) { app.prompts.resolveConfirm(request.id, confirmed: true) }
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(20)
+        .frame(width: 460)
+        .interactiveDismissDisabled()
     }
 }
 

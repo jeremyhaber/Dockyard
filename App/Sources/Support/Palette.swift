@@ -19,6 +19,7 @@ enum Palette {
     static let cloudBg = Color("CloudBadgeBg")
     static let cloudFg = Color("CloudBadgeFg")
     static let drawer = Color("DrawerBg")
+    static let rootFg = Color("RootBadgeFg")
 
     static func ns(_ name: String) -> NSColor { NSColor(named: name) ?? .labelColor }
 
@@ -48,7 +49,7 @@ extension Font {
 
 /// A small coloured tag such as PROD or CLOUD.
 struct Badge: View {
-    enum Style { case prod, cloud, new }
+    enum Style { case prod, cloud, new, root }
     let text: String
     let style: Style
 
@@ -67,6 +68,7 @@ struct Badge: View {
         case .prod: Palette.prodFg
         case .cloud: Palette.cloudFg
         case .new: Color.accentColor
+        case .root: Palette.rootFg
         }
     }
 
@@ -75,6 +77,7 @@ struct Badge: View {
         case .prod: Palette.prodBg
         case .cloud: Palette.cloudBg
         case .new: Color.accentColor.opacity(0.15)
+        case .root: Palette.statusAmber.opacity(0.25)
         }
     }
 }
