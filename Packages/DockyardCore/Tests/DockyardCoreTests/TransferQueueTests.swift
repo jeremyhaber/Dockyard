@@ -112,9 +112,9 @@ func upload(_ env: TransferEnv, _ rel: String, to server: TransferEndpoint, _ de
         #expect(server.maxActive == 5)
     }
 
-    @Test func defaultConcurrencyIsThree() async {
+    @Test func defaultGlobalCapIsTen() async {
         let q = TransferQueue()
-        #expect(await q.maxConcurrent == 3)
+        #expect(await q.maxConcurrent == 10)
         await q.setMaxConcurrent(0)
         #expect(await q.maxConcurrent == 1)
     }
