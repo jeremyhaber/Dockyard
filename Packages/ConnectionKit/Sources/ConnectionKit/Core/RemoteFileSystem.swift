@@ -48,6 +48,7 @@ public enum RemoteError: Error, Equatable, CustomStringConvertible {
     case serverRejected(code: Int, message: String)
     case unsupported(String)
     case invalidConfiguration(String)
+    case hostKeyRejected(String)
 
     public var description: String {
         switch self {
@@ -59,6 +60,7 @@ public enum RemoteError: Error, Equatable, CustomStringConvertible {
         case .serverRejected(let code, let m): "Server replied \(code) \(m)"
         case .unsupported(let m): "Unsupported: \(m)"
         case .invalidConfiguration(let m): "Invalid configuration: \(m)"
+        case .hostKeyRejected(let fingerprint): "Host key rejected (\(fingerprint))"
         }
     }
 }

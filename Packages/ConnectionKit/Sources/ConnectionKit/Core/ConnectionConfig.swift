@@ -18,6 +18,9 @@ public struct AuthMethods: OptionSet, Sendable, Hashable, Codable {
 
     public static let key = AuthMethods(rawValue: 1)
     public static let password = AuthMethods(rawValue: 2)
+    public static let agent = AuthMethods(rawValue: 4)
+    /// Answers keyboard-interactive prompts with the stored password. `.password` also falls back to it.
+    public static let keyboardInteractive = AuthMethods(rawValue: 8)
     public static let both: AuthMethods = [.key, .password]
 }
 
