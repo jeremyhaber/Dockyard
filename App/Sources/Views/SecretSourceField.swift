@@ -22,6 +22,14 @@ struct SecretSourceField: View {
         Binding(get: { draft.references[purpose] ?? "" }, set: { draft.references[purpose] = $0 })
     }
 
+    private var sourceBinding: Binding<Bool> {
+        Binding(
+            get: { draft.onePasswordPurposes.contains(purpose) },
+            set: { onePassword in
+                if onePassword { draft.onePasswordPurposes.insert(purpose) } else { draft.onePasswordPurposes.remove(purpose) }
+            })
+    }
+
     private var secret: Binding<String> {
         switch purpose {
         case .keyPassphrase: $draft.keyPassphrase
@@ -31,7 +39,7 @@ struct SecretSourceField: View {
     }
 
     var body: some View {
-        Picker("\(title) from", selection: Binding(get: { usesOnePassword }, set: setSource)) {
+        Picker("\(title) from", selection: sourceBinding) {
             Text("Keychain").tag(false)
             Text("1Password").tag(true)
         }
@@ -76,9 +84,6 @@ struct SecretSourceField: View {
             .fixedSize(horizontal: false, vertical: true)
     }
 
-    private func setSource(_ onePassword: Bool) {
-        if onePassword { draft.onePasswordPurposes.insert(purpose) } else { draft.onePasswordPurposes.remove(purpose) }
-    }
 }
 
 /// The agent choice under "SSH agent": the system agent, 1Password's, or a socket path.
