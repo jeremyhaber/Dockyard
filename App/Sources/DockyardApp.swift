@@ -35,6 +35,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.appearance = NSAppearance(named: name.lowercased() == "dark" ? .darkAqua : .aqua)
     }
 
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        guard !DemoMode.isEnabled else { return }
+        _ = UpdateModel.shared
+        AuthGate.installRevocation()
+        Task.detached(priority: .utility) { QuickLookCenter.purgeStaleCache() }
+    }
+
+    /// Opening a `.dockyardexport` file in Finder starts the import.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        guard let file = urls.first(where: { $0.pathExtension == "dockyardexport" }) else { return }
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 800_000_000)
+            AppModel.shared.presentImportExport(url: file)
+        }
+    }
+
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
     /// Session state is written before the app exits (the async flush needs a moment, hence `terminateLater`).
@@ -79,6 +95,16 @@ struct AppCommands: Commands {
             Button("Close Connection Tab") { if let s = model.activeSession { model.close(s) } }
                 .keyboardShortcut("w", modifiers: [.command, .shift])
                 .disabled(model.activeSession == nil)
+        }
+
+        CommandGroup(after: .appInfo) {
+            Button("Check for Updates\u{2026}") { UpdateModel.shared.checkForUpdates() }
+                .disabled(DemoMode.isEnabled)
+        }
+
+        CommandGroup(after: .importExport) {
+            Button("Import Connections\u{2026}") { model.presentImportExport() }
+            Button("Export Connections\u{2026}") { model.presentExport() }
         }
 
         CommandGroup(replacing: .undoRedo) {

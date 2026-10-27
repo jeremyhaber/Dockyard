@@ -21,6 +21,8 @@ packages:
     path: ../Packages/RcloneKit
   SwiftTerm:
     path: ThirdParty/SwiftTerm
+  Sparkle:
+    path: ThirdParty/Sparkle
 targets:
   Dockyard:
     type: application
@@ -41,6 +43,8 @@ targets:
         product: RcloneKit
       - package: SwiftTerm
         product: SwiftTerm
+      - package: Sparkle
+        product: Sparkle
       - target: DockyardFinder
         embed: true
     info:
@@ -52,6 +56,22 @@ targets:
         LSMinimumSystemVersion: "14.0"
         LSApplicationCategoryType: public.app-category.developer-tools
         NSHumanReadableCopyright: "Copyright Dockyard"
+        # Placeholders until the first signed release; the updater stays off while they are in place (docs/app.md).
+        SUFeedURL: https://example.invalid/appcast.xml
+        SUPublicEDKey: REPLACE_WITH_SPARKLE_PUBLIC_ED_KEY
+        SUEnableAutomaticChecks: true
+        UTExportedTypeDeclarations:
+          - UTTypeIdentifier: app.dockyard.export
+            UTTypeDescription: Dockyard connection export
+            UTTypeConformsTo: [public.data]
+            UTTypeTagSpecification:
+              public.filename-extension: [dockyardexport]
+              public.mime-type: application/vnd.dockyard.export
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: Dockyard connection export
+            CFBundleTypeRole: Editor
+            LSHandlerRank: Owner
+            LSItemContentTypes: [app.dockyard.export]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.dockyard.mac

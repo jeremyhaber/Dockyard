@@ -7,22 +7,33 @@ struct PaneView: View {
     @Environment(AppModel.self) private var app
     let pane: PaneModel
     let session: ConnectionSession
-    @AppStorage("treeHeight") private var treeHeight = 190.0
-    @State private var treeBase = 190.0
+    @AppStorage private var treeHeight: Double
+
+    init(pane: PaneModel, session: ConnectionSession) {
+        self.pane = pane
+        self.session = session
+        _treeHeight = AppStorage(wrappedValue: TreeLayout.defaultHeight, TreeLayout.key(for: pane.side))
+    }
 
     var body: some View {
+        GeometryReader { proxy in
+            content(treeHeight: TreeLayout.clamp(treeHeight, available: proxy.size.height))
+        }
+        .background(Palette.ground)
+    }
+
+    private func content(treeHeight shown: Double) -> some View {
         VStack(spacing: 0) {
             PathBar(pane: pane, session: session)
             Divider()
             FolderTreeView(pane: pane, session: session, version: pane.treeSignature)
-                .frame(minHeight: 50, idealHeight: treeHeight, maxHeight: treeHeight)
-                .layoutPriority(-1)
-            resizeHandle
+                .frame(height: shown)
+            TreeResizeHandle(height: shown) { treeHeight = $0 }
             FolderTabsBar(pane: pane)
             Divider()
             ZStack {
                 FileTableView(pane: pane, session: session, version: pane.rowsVersion, sort: pane.sort)
-                    .frame(minHeight: 60)
+                    .frame(minHeight: TreeLayout.minListHeight)
                 if let message = pane.errorMessage {
                     VStack(spacing: 6) {
                         Image(systemName: "exclamationmark.triangle")
@@ -47,29 +58,6 @@ struct PaneView: View {
             Divider()
             footer
         }
-        .background(Palette.ground)
-        .onAppear { treeBase = treeHeight }
-    }
-
-    private var resizeHandle: some View {
-        Rectangle()
-            .fill(Palette.border)
-            .frame(height: 1)
-            .overlay {
-                Rectangle()
-                    .fill(Color.clear)
-                    .frame(height: 8)
-                    .contentShape(Rectangle())
-                    .onHover { inside in
-                        if inside { NSCursor.resizeUpDown.push() } else { NSCursor.pop() }
-                    }
-                    .gesture(
-                        DragGesture(minimumDistance: 1)
-                            .onChanged { value in treeHeight = min(max(60, treeBase + value.translation.height), 520) }
-                            .onEnded { _ in treeBase = treeHeight }
-                    )
-            }
-            .accessibilityLabel("Resize folder tree")
     }
 
     private var footer: some View {

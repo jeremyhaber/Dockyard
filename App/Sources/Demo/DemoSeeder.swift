@@ -54,6 +54,10 @@ enum DemoSeeder {
             lastConnectedAt: ago(12 * day), createdAt: ago(250 * day),
             cloud: CloudSpec(backend: "s3", options: ["provider": "AWS", "region": "eu-west-1"], root: "dockyard-backups")))
 
+        list.append(Connection(
+            id: id(6), name: "Staging (via bastion)", protocol: .sftp, host: "10.0.4.12", username: "deploy", authMethods: .key,
+            keyPath: "~/.ssh/id_ed25519", tags: ["internal"], createdAt: ago(60 * day), jumpHost: id(4)))
+
         // WHM accounts.
         let domains = [
             "cedarpinelaw", "deltadental", "evergreenlandscaping", "granitefitness", "harborbooks", "ivyinteriors",
@@ -188,6 +192,12 @@ enum DemoSeeder {
             app.jumpVisible = true
         case "siteEditor":
             if let c = app.allConnections.first(where: { $0.id == id(2) }) { app.editConnection(c, origin: .main) }
+        case "siteEditorJump":
+            if let c = app.allConnections.first(where: { $0.id == id(6) }) { app.editConnection(c, origin: .main) }
+        case "importPreview", "importUnsupported", "export", "importExport":
+            await app.showImportDemo(DemoMode.screen)
+        case "quickLook":
+            await app.showQuickLookDemo()
         case "terminal":
             if let bluebird { app.activate(bluebird) }
             app.drawerTab = .terminal

@@ -28,6 +28,7 @@ enum DemoMode {
         switch screen {
         case "connectionManager": "manager"
         case "settings": "settings"
+        case "quickLook": "quickLook"
         default: "main"
         }
     }

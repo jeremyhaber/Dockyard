@@ -40,9 +40,10 @@ struct SettingsView: View {
                     LabeledContent("Sync accounts every", value: "\(whmHours) hour\(whmHours == 1 ? "" : "s")")
                 }
             }
+            MacSettingsSections()
         }
         .formStyle(.grouped)
-        .frame(width: 520, height: 600)
+        .frame(width: 520, height: 680)
         .background(WindowAccessor { window in DemoWindows.register("settings", window) })
     }
 

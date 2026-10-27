@@ -20,6 +20,7 @@ enum ManagerScope: Hashable {
     case all, favorites, openNow, recentlyAdded
     case whm(UUID)
     case filezilla, manual, quickConnect
+    case imported(ConnectionSource)
 }
 
 struct ManagerFilterKey: Hashable {
@@ -66,6 +67,7 @@ final class ConnectionManagerModel {
         case .filezilla: scopeFilter = .source(.filezillaImport)
         case .manual: scopeFilter = .source(.manual)
         case .quickConnect: scopeFilter = .source(.quickConnect)
+        case .imported(let source): scopeFilter = .source(source)
         }
         return ConnectionFilter(
             scope: scopeFilter, search: search, protocols: protocols, whmServer: whmServer,

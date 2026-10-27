@@ -27,6 +27,7 @@ struct SiteEditorSheet: View {
                 if draft.protocolChoice == .cloud {
                     cloudSection
                 } else if draft.protocolChoice == .sftp {
+                    JumpHostSection(draft: $draft)
                     authSection
                     elevationSection
                 } else {
@@ -45,7 +46,7 @@ struct SiteEditorSheet: View {
         .task {
             clientFolders = (try? await app.folders.all()) ?? []
             if let id = request.connection?.id {
-                hasStoredPassword = ((try? await app.secrets.secret(for: id, purpose: .password)) ?? nil) != nil
+                hasStoredPassword = ((try? await app.ungatedSecrets.secret(for: id, purpose: .password)) ?? nil) != nil
             }
         }
     }

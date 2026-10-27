@@ -21,6 +21,7 @@ enum SiteDraftError: Error, Equatable, CustomStringConvertible {
     case invalidPort(String)
     case missingKeyPath
     case noAuthMethod
+    case jump(String)
 
     var description: String {
         switch self {
@@ -28,6 +29,7 @@ enum SiteDraftError: Error, Equatable, CustomStringConvertible {
         case .invalidPort(let text): "\"\(text)\" is not a valid port."
         case .missingKeyPath: "Choose the private key file, or turn off SSH key."
         case .noAuthMethod: "Turn on at least one authentication method."
+        case .jump(let message): message
         }
     }
 }
@@ -67,6 +69,7 @@ struct SiteDraft {
     var connectDelayMs = 0
     var localFolder = ""
     var restoreSession = true
+    var jumpHost: UUID?
 
     var cloudPresetID = "s3"
     var cloudRoot = ""
@@ -110,6 +113,7 @@ struct SiteDraft {
         connectDelayMs = c.connectDelayMs
         localFolder = c.localFolder ?? ""
         restoreSession = c.restoreSession
+        jumpHost = c.jumpHost
         if let cloud = c.cloud {
             cloudPresetID = CloudPreset.preset(for: cloud)?.id ?? "s3"
             cloudRoot = cloud.root
@@ -173,6 +177,7 @@ struct SiteDraft {
         c.connectDelayMs = max(0, connectDelayMs)
         c.localFolder = localFolder.trimmingCharacters(in: .whitespaces).isEmpty ? nil : localFolder
         c.restoreSession = restoreSession
+        c.jumpHost = proto == .sftp ? jumpHost : nil
         c.cloud = isCloud ? cloudPreset.spec(root: cloudRoot, region: cloudRegion) : nil
         return c
     }

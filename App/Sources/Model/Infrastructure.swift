@@ -53,6 +53,8 @@ extension Error {
         if let app = self as? AppError { return app.errorDescription ?? "\(self)" }
         if let remote = self as? RemoteError { return remote.description }
         if let rpc = self as? RcloneRPCError { return rpc.message }
+        if let export = self as? ExportError { return export.description }
+        if let jump = self as? JumpChainError { return jump.description }
         return (self as? LocalizedError)?.errorDescription ?? localizedDescription
     }
 }
@@ -81,7 +83,8 @@ enum FileSystemFactory {
     }
 
     static func make(
-        for connection: Connection, secrets: any SecretStore, hostKeyValidator: SSHHostKeyValidator, browseAsRoot: Bool = false
+        for connection: Connection, secrets: any SecretStore, hostKeyValidator: SSHHostKeyValidator, browseAsRoot: Bool = false,
+        jumpHops: [SSHJumpHop] = []
     ) throws -> any RemoteFileSystem {
         if DemoMode.isEnabled {
             return DemoFileSystem(
@@ -90,9 +93,9 @@ enum FileSystemFactory {
         }
         switch connection.protocol {
         case .sftp:
-            return SFTPFileSystem(
-                config: connection.config, secrets: secrets, hostKeyValidator: hostKeyValidator,
-                options: SFTPFileSystem.Options(browseAsRoot: browseAsRoot && connection.elevation != .none))
+            var options = SFTPFileSystem.Options(browseAsRoot: browseAsRoot && connection.elevation != .none)
+            options.jumpHosts = jumpHops
+            return SFTPFileSystem(config: connection.config, secrets: secrets, hostKeyValidator: hostKeyValidator, options: options)
         case .ftp, .ftps:
             return FTPFileSystem(config: connection.config, secrets: secrets)
         case .rclone:

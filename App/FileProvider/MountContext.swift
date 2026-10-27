@@ -19,6 +19,7 @@ actor MountContext {
     private(set) var readOnly = true
 
     private var connection: Connection?
+    private var jumpChain: [Connection] = []
     private var fs: (any RemoteFileSystem)?
     private var connected = false
     private let poller = MountPoller()
@@ -52,6 +53,14 @@ actor MountContext {
         guard let record = try await ConnectionRepository(database: db).connection(id: connectionID) else {
             throw MountError.unavailable("This connection no longer exists in Dockyard.")
         }
+        let repository = ConnectionRepository(database: db)
+        var chain: [Connection] = []
+        var next = record.jumpHost
+        while let id = next, chain.count < JumpChain.maxHops, let hop = try await repository.connection(id: id) {
+            chain.insert(hop, at: 0)
+            next = hop.jumpHost
+        }
+        jumpChain = chain
         connection = record
         readOnly = record.mountReadOnly
         return record
@@ -62,13 +71,20 @@ actor MountContext {
         let config = MountPolicy.config(for: c)
         switch c.protocol {
         case .sftp:
-            let validator = SSHHostKeyValidator { key in
-                guard let db = try? DockyardDatabase.openReadOnly(path: AppGroup.databaseURL.path) else { return false }
-                let verdict = try? await KnownHostRepository(database: db).verdict(
-                    host: c.host, port: c.port, keyType: key.algorithm, fingerprint: key.fingerprint)
-                return verdict == .trusted
+            func trustedOnly(host: String, port: Int) -> SSHHostKeyValidator {
+                SSHHostKeyValidator { key in
+                    guard let db = try? DockyardDatabase.openReadOnly(path: AppGroup.databaseURL.path) else { return false }
+                    let verdict = try? await KnownHostRepository(database: db).verdict(
+                        host: host, port: port, keyType: key.algorithm, fingerprint: key.fingerprint)
+                    return verdict == .trusted
+                }
             }
-            return SFTPFileSystem(config: config, secrets: secrets, hostKeyValidator: validator)
+            var options = SFTPFileSystem.Options()
+            options.jumpHosts = jumpChain.map {
+                SSHJumpHop(config: $0.config, secrets: secrets, hostKeyValidator: trustedOnly(host: $0.host, port: $0.port))
+            }
+            return SFTPFileSystem(
+                config: config, secrets: secrets, hostKeyValidator: trustedOnly(host: c.host, port: c.port), options: options)
         case .ftp, .ftps:
             return FTPFileSystem(config: config, secrets: secrets)
         case .rclone:
