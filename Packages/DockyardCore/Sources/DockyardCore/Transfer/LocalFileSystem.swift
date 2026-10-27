@@ -129,9 +129,9 @@ enum LocalFileSize {
 }
 
 extension RemoteFileSystem {
-    /// Like `stat` but avoids listing the parent for local file systems.
+    /// Like `stat` but avoids listing the parent for local file systems, and answers nil when the parent is missing.
     public func lookup(_ path: String) async throws -> RemoteItem? {
         if let local = self as? LocalFileSystem { return local.stat(path: path) }
-        return try await stat(path)
+        do { return try await stat(path) } catch RemoteError.notFound { return nil }  // parent folder missing too
     }
 }
