@@ -127,6 +127,7 @@ public final class DockyardDatabase: Sendable {
                 t.primaryKey(["host", "port", "keyType"])
             }
         }
+        registerJournalMigration(&migrator)
         return migrator
     }
 }

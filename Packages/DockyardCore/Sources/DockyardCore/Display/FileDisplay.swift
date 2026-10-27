@@ -51,4 +51,27 @@ public enum FileDisplay {
         guard let date else { return "" }
         return formatter.withLock { $0.string(from: date) }
     }
+
+    private static let compactFormatters = LockedBox<[String: DateFormatter]>([:])
+
+    /// `Oct 25, 14:02`, or `Oct 25, 2024` when the year is not the current one. Always English month names.
+    public static func modifiedCompact(_ date: Date?, now: Date = Date(), timeZone: TimeZone = .current) -> String {
+        guard let date else { return "" }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        let sameYear = calendar.component(.year, from: date) == calendar.component(.year, from: now)
+        let format = sameYear ? "MMM d, HH:mm" : "MMM d, yyyy"
+        return compactFormatters.withLock { cache in
+            let key = "\(format)|\(timeZone.identifier)"
+            let formatter = cache[key] ?? {
+                let f = DateFormatter()
+                f.locale = Locale(identifier: "en_US_POSIX")
+                f.timeZone = timeZone
+                f.dateFormat = format
+                cache[key] = f
+                return f
+            }()
+            return formatter.string(from: date)
+        }
+    }
 }
