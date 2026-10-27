@@ -23,6 +23,9 @@ enum DemoMode {
     /// screenshot script does not have to guess which window is the right one.
     static let windowIDFile: String? = UserDefaults.standard.string(forKey: "DockyardWindowIDFile")
 
+    /// Folder under the temp directory that stands in for ~/Downloads/acme-backups in demo downloads.
+    static let downloadsMarker = "dockyard-demo/acme-backups"
+
     /// Screens that show the Connections window.
     static var opensManager: Bool { ["connectionManager", "healthCheck", "recentlyRemoved"].contains(screen) }
 

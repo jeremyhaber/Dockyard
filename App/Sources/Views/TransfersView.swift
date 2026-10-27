@@ -545,6 +545,7 @@ private enum RemotePathText {
     /// The destination folder: on this Mac with the home folder shown as `~`, otherwise the remote path.
     static func destination(of job: TransferJobInfo) -> String {
         let folder = parent(job.destinationPath)
+        if DemoMode.isEnabled, folder.hasSuffix(DemoMode.downloadsMarker) { return "~/Downloads/acme-backups" }
         guard job.route.hasSuffix("\u{2192} This Mac") else { return folder }
         return (folder as NSString).abbreviatingWithTildeInPath
     }

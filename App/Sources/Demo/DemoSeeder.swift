@@ -183,9 +183,10 @@ enum DemoSeeder {
         await app.refreshUndoState()
     }
 
-    /// Where demo downloads land; the Transfers tab shows it as ~/Downloads/acme-backups.
+    /// Where demo downloads really land: a temp folder. The Transfers tab shows it as ~/Downloads/acme-backups
+    /// (`DemoMode.downloadsMarker`), so demo mode writes nothing outside the temp directory.
     private static var demoDownloads: String {
-        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Downloads/acme-backups").path
+        FileManager.default.temporaryDirectory.appendingPathComponent(DemoMode.downloadsMarker).path
     }
 
     private static func enqueueTransfers(_ app: AppModel, relay: Bool) {
