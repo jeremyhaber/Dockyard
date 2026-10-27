@@ -54,6 +54,13 @@ public struct MountDomainSpec: Sendable, Equatable {
     public var connectionId: UUID
     public var displayName: String
     public var readOnly: Bool
+
+    public init(identifier: String, connectionId: UUID, displayName: String, readOnly: Bool) {
+        self.identifier = identifier
+        self.connectionId = connectionId
+        self.displayName = displayName
+        self.readOnly = readOnly
+    }
 }
 
 public enum MountPolicy {
