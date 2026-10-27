@@ -7,9 +7,12 @@ struct DrawerView: View {
     @Environment(AppModel.self) private var app
     @State private var errorsOnly = false
     @State private var dragBase = 0.0
+    @State private var showSnippets = false
 
     var body: some View {
         @Bindable var app = app
+        let session = app.activeSession
+        let hasLines = (session?.logCounts.total ?? 0) > 0
         VStack(spacing: 0) {
             handle
             HStack(spacing: 10) {
@@ -20,17 +23,19 @@ struct DrawerView: View {
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 .frame(width: 180)
+                if app.drawerTab == .terminal, let session, session.status.isConnected, session.shellAvailable {
+                    terminalControls(session)
+                }
                 Spacer()
                 if app.drawerTab == .log {
                     Toggle("Errors only", isOn: $errorsOnly)
                         .toggleStyle(.checkbox)
-                        .foregroundStyle(.white.opacity(0.85))
                     Button("Copy") { copy() }
                         .controlSize(.small)
-                        .disabled(app.activeSession == nil)
-                    Button("Clear") { app.activeSession?.log.clear() }
+                        .disabled(!hasLines)
+                    Button("Clear") { session?.log.clear() }
                         .controlSize(.small)
-                        .disabled(app.activeSession == nil)
+                        .disabled(!hasLines)
                 }
                 Button {
                     app.drawerVisible = false
@@ -38,7 +43,6 @@ struct DrawerView: View {
                     Image(systemName: "xmark")
                 }
                 .buttonStyle(.borderless)
-                .foregroundStyle(.white.opacity(0.85))
                 .accessibilityLabel("Close drawer")
             }
             .padding(.horizontal, 10)
@@ -47,19 +51,55 @@ struct DrawerView: View {
             Group {
                 switch app.drawerTab {
                 case .log:
-                    if let session = app.activeSession {
+                    if let session {
                         LogTableView(session: session, version: session.logVersion, errorsOnly: errorsOnly)
                             .id(session.id)
                     } else {
                         placeholder(icon: "text.alignleft", text: "Open a connection to see its log.")
                     }
                 case .terminal:
-                    placeholder(icon: "terminal", text: "The terminal is not available yet. It will open an SSH shell on the active connection.")
+                    if let session {
+                        TerminalPane(session: session)
+                    } else {
+                        placeholder(icon: "terminal", text: "Open a connection to use its terminal.")
+                    }
                 }
             }
         }
         .frame(height: app.drawerHeight)
         .background(Palette.drawer)
+        // The drawer is dark in both appearances, so its controls use the dark control style.
+        .environment(\.colorScheme, .dark)
+        .sheet(isPresented: $showSnippets) {
+            if let session { SnippetsSheet(session: session) }
+        }
+    }
+
+    @ViewBuilder
+    private func terminalControls(_ session: ConnectionSession) -> some View {
+        let controller = session.terminal()
+        Button {
+            if let path = session.server?.currentPath { controller.changeDirectory(to: path) }
+        } label: {
+            Label("cd to current folder", systemImage: "folder")
+        }
+        .controlSize(.small)
+        .help("Type cd into the shell for the active server folder")
+        Menu {
+            ForEach(controller.snippets) { snippet in
+                Button(snippet.name) {
+                    controller.type(snippet.command, run: NSEvent.modifierFlags.contains(.option))
+                }
+            }
+            if !controller.snippets.isEmpty { Divider() }
+            Button("Manage Snippets\u{2026}") { showSnippets = true }
+        } label: {
+            Label("Snippets", systemImage: "text.badge.star")
+        }
+        .menuStyle(.button)
+        .controlSize(.small)
+        .fixedSize()
+        .help("Click a snippet to type it, hold Option to run it")
     }
 
     private var handle: some View {

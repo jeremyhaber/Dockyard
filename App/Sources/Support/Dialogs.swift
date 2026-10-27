@@ -28,6 +28,16 @@ enum Dialogs {
         return alert.runModal() == .alertFirstButtonReturn
     }
 
+    /// A warning with several buttons. Returns the index of the clicked button (the first is the default).
+    static func choose(title: String, message: String, buttons: [String]) -> Int {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.alertStyle = .warning
+        for button in buttons { alert.addButton(withTitle: button) }
+        return alert.runModal().rawValue - NSApplication.ModalResponse.alertFirstButtonReturn.rawValue
+    }
+
     static func chooseFile(directory: URL? = nil, canChooseDirectories: Bool = false, showHidden: Bool = true, types: [UTType]? = nil) -> URL? {
         let panel = NSOpenPanel()
         panel.canChooseFiles = !canChooseDirectories

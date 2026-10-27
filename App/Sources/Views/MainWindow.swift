@@ -6,6 +6,7 @@ import SwiftUI
 struct MainWindow: View {
     @Environment(AppModel.self) private var app
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         VStack(spacing: 0) {
@@ -51,10 +52,21 @@ struct MainWindow: View {
         } message: {
             Text(app.activeSession?.operationError ?? "")
         }
-        .frame(minWidth: 1020, minHeight: 600)
-        .task {
-            if DemoMode.isEnabled, DemoMode.screen == "connectionManager" { openWindow(id: "manager") }
+        .overlay(alignment: .bottomTrailing) { ToastStack().padding(.bottom, 44).padding(.trailing, 14) }
+        .sheet(isPresented: compareBinding) {
+            if let session = app.activeSession { CompareSheet(session: session) }
         }
+        .background(WindowAccessor { window in DemoWindows.register("main", window) })
+        .frame(minWidth: 980, minHeight: 620)
+        .task {
+            guard DemoMode.isEnabled else { return }
+            if DemoMode.screen == "connectionManager" { openWindow(id: "manager") }
+            if DemoMode.screen == "settings" { openSettings() }
+        }
+    }
+
+    private var compareBinding: Binding<Bool> {
+        Binding(get: { app.compareVisible }, set: { app.compareVisible = $0 })
     }
 
     private var subtitle: String {
@@ -104,17 +116,36 @@ struct MainToolbar: ToolbarContent {
             }
             .help("Jump to a site or recent folder (\u{2318}K)")
 
-            Button {} label: {
-                Label("Sync / Compare", systemImage: "arrow.triangle.2.circlepath")
+            Picker("Layout", selection: layoutBinding) {
+                Image(systemName: "rectangle.split.2x1")
+                    .accessibilityLabel("Local and server")
+                    .tag(LayoutMode.localServer)
+                Image(systemName: "rectangle.split.3x1")
+                    .accessibilityLabel("Servers side by side")
+                    .tag(LayoutMode.sideBySide)
             }
-            .disabled(true)
-            .help("Coming soon")
+            .pickerStyle(.segmented)
+            .help("Switch between Local + server and Servers side by side")
 
-            Button {} label: {
-                Label("Servers side by side", systemImage: "rectangle.split.2x1")
+            Button {
+                app.compareVisible = true
+            } label: {
+                Label("Compare / Sync", systemImage: "arrow.triangle.2.circlepath")
             }
-            .disabled(true)
-            .help("Coming soon")
+            .disabled(!canCompare)
+            .help("Compare the local and server folders of the active tabs")
+
+            if let connection = app.activeSession?.connection {
+                Button {
+                    app.setMounted(connection, !connection.mountInFinder)
+                } label: {
+                    Label(
+                        connection.mountInFinder ? "Unmount from Finder" : "Mount in Finder",
+                        systemImage: connection.mountInFinder ? "externaldrive.badge.minus" : "externaldrive.badge.plus")
+                }
+                .disabled(!MountPolicy.canMount(connection))
+                .help(connection.mountInFinder ? "Remove this connection from Finder" : "Show this connection as a drive in Finder")
+            }
 
             Button {
                 if let session = app.activeSession { app.disconnect(session) }
@@ -124,6 +155,15 @@ struct MainToolbar: ToolbarContent {
             .disabled(!(app.activeSession?.status.isConnected ?? false))
             .help("Disconnect the active connection")
         }
+    }
+
+    private var layoutBinding: Binding<LayoutMode> {
+        Binding(get: { app.layoutMode }, set: { app.setLayout($0) })
+    }
+
+    private var canCompare: Bool {
+        guard let session = app.activeSession else { return false }
+        return session.status.isConnected && session.local != nil && session.server != nil
     }
 }
 
@@ -173,6 +213,13 @@ struct ConnectionTab: View {
                 .lineLimit(1)
             if session.connection.isProd { Badge(text: "PROD", style: .prod) }
             if session.connection.protocol == .rclone { Badge(text: "CLOUD", style: .cloud) }
+            if session.connection.readOnly {
+                Image(systemName: "lock.fill")
+                    .font(.system(size: 9))
+                    .foregroundStyle(Palette.textSecondary)
+                    .help("Read-only: uploads, deletes, renames and permission changes are blocked")
+                    .accessibilityLabel("Read-only")
+            }
             Button {
                 app.close(session)
             } label: {
@@ -233,7 +280,9 @@ struct WorkArea: View {
 
     var body: some View {
         Group {
-            if let session = app.activeSession {
+            if app.layoutMode == .sideBySide, !app.sessions.isEmpty {
+                SideBySideView()
+            } else if let session = app.activeSession {
                 SessionContent(session: session)
                     .id(session.id)
             } else {
@@ -253,25 +302,36 @@ struct WorkArea: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .clipped()
         .background(Palette.ground)
     }
 }
 
 struct SessionContent: View {
+    let session: ConnectionSession
+
+    var body: some View {
+        if session.status.isConnected || session.status == .reconnecting, let local = session.local, let server = session.server {
+            HSplitView {
+                PaneView(pane: local, session: session)
+                    .frame(minWidth: 320)
+                PaneView(pane: server, session: session)
+                    .frame(minWidth: 320)
+            }
+        } else {
+            ConnectionStateView(session: session)
+        }
+    }
+}
+
+/// What a connection tab or column shows while it is connecting, failed or closed.
+struct ConnectionStateView: View {
     @Environment(AppModel.self) private var app
     let session: ConnectionSession
 
     var body: some View {
         switch session.status {
-        case .connected, .reconnecting:
-            if let local = session.local, let server = session.server {
-                HSplitView {
-                    PaneView(pane: local, session: session)
-                        .frame(minWidth: 320)
-                    PaneView(pane: server, session: session)
-                        .frame(minWidth: 320)
-                }
-            }
         case .connecting:
             VStack(spacing: 10) {
                 ProgressView()
@@ -283,6 +343,8 @@ struct SessionContent: View {
             statusView(icon: "exclamationmark.triangle", title: "Could not connect", message: message)
         case .disconnected:
             statusView(icon: "bolt.slash", title: "Disconnected", message: "This connection is closed.")
+        case .connected, .reconnecting:
+            Color.clear
         }
     }
 

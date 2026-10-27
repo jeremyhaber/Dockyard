@@ -54,6 +54,9 @@ struct TransferBar: View {
             .popover(isPresented: $showQueue, arrowEdge: .top) { QueuePopover() }
             .accessibilityLabel("Transfer queue")
 
+            EditingIndicator()
+            ArchiveIndicator()
+
             Spacer()
 
             logButton
@@ -112,120 +115,71 @@ struct TransferBar: View {
     }
 }
 
-struct QueuePopover: View {
+/// "Editing 2 files": server files opened in an editor and uploaded on every save, with a Stop button each.
+struct EditingIndicator: View {
     @Environment(AppModel.self) private var app
+    @State private var showList = false
 
     var body: some View {
-        let snapshot = app.transfers
-        VStack(spacing: 0) {
-            HStack {
-                Text("Transfers").font(.headline)
-                Spacer()
-                Button("Retry failed") { app.retryFailedTransfers() }
-                    .disabled(snapshot.failedCount == 0)
-                Button("Clear finished") { app.clearFinishedTransfers() }
-                Button("Cancel all") { app.cancelAllTransfers() }
-                    .disabled(snapshot.isIdle)
+        let entries = app.edits.entries
+        if !entries.isEmpty {
+            Button {
+                showList.toggle()
+            } label: {
+                Label("Editing \(entries.count) file\(entries.count == 1 ? "" : "s")", systemImage: "pencil.and.outline")
             }
             .controlSize(.small)
-            .padding(10)
-            Divider()
-            if snapshot.jobs.isEmpty {
-                Text("The queue is empty")
-                    .foregroundStyle(Palette.textSecondary)
-                    .padding(24)
-            } else {
-                ScrollView {
-                    LazyVStack(spacing: 0) {
-                        ForEach(snapshot.jobs) { job in
-                            JobRow(job: job)
-                            Divider()
+            .help("Files you are editing; saves upload automatically")
+            .popover(isPresented: $showList, arrowEdge: .top) {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("Saved changes upload automatically")
+                        .font(.caption)
+                        .foregroundStyle(Palette.textSecondary)
+                        .padding(10)
+                    Divider()
+                    ForEach(app.edits.entries) { entry in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(entry.fileName).font(.system(size: 12, weight: .medium))
+                                Text("\(entry.connectionName) \u{00B7} \(entry.remotePath)")
+                                    .font(.monoSmall)
+                                    .foregroundStyle(Palette.textSecondary)
+                                    .lineLimit(1)
+                                    .truncationMode(.head)
+                            }
+                            Spacer(minLength: 12)
+                            Button("Stop") { app.edits.stop(entry.id) }
+                                .controlSize(.small)
+                                .accessibilityLabel("Stop editing \(entry.fileName)")
                         }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        Divider()
                     }
                 }
-                .frame(maxHeight: 340)
+                .frame(width: 420)
             }
         }
-        .frame(width: 480)
     }
 }
 
-struct JobRow: View {
+/// Running compress and extract jobs, with a cancel button each.
+struct ArchiveIndicator: View {
     @Environment(AppModel.self) private var app
-    let job: TransferJobInfo
 
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: icon)
-                .foregroundStyle(color)
-                .frame(width: 18)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(job.name).font(.system(size: 12)).lineLimit(1)
-                Text(job.isRelay ? "\(job.route), relayed through this Mac" : job.route)
-                    .font(.system(size: 10))
-                    .foregroundStyle(Palette.textSecondary)
+        ForEach(app.archives.running) { job in
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text("\(job.title) \u{00B7} \(job.place)")
+                    .font(.system(size: 11))
                     .lineLimit(1)
-                if let error = job.error {
-                    Text(error).font(.system(size: 10)).foregroundStyle(.red).lineLimit(2)
-                } else if job.state == .running, let fraction = job.fraction {
-                    ProgressView(value: fraction)
-                }
-                if job.isDirectory, job.childCount > 0 {
-                    Text("\(job.finishedChildCount) of \(job.childCount) items")
-                        .font(.system(size: 10))
-                        .foregroundStyle(Palette.textSecondary)
-                }
-            }
-            Spacer()
-            Text(stateText)
-                .font(.system(size: 10))
-                .foregroundStyle(Palette.textSecondary)
-            if job.state == .queued || job.state == .running {
                 Button {
-                    app.cancelTransfer(job.id)
+                    app.archives.cancel(job.id)
                 } label: { Image(systemName: "xmark.circle") }
                     .buttonStyle(.borderless)
-                    .accessibilityLabel("Cancel \(job.name)")
-            } else if job.state == .failed || job.state == .cancelled {
-                Button {
-                    app.retryTransfer(job.id)
-                } label: { Image(systemName: "arrow.clockwise") }
-                    .buttonStyle(.borderless)
-                    .accessibilityLabel("Retry \(job.name)")
+                    .accessibilityLabel("Cancel \(job.title)")
             }
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-    }
-
-    private var stateText: String {
-        switch job.state {
-        case .queued: "Queued"
-        case .running: job.willResume ? "Resuming" : "Running"
-        case .completed: "Done"
-        case .failed: "Failed"
-        case .cancelled: "Cancelled"
-        case .skipped: "Skipped"
-        }
-    }
-
-    private var icon: String {
-        switch job.state {
-        case .queued: "clock"
-        case .running: "arrow.up.arrow.down"
-        case .completed: "checkmark.circle"
-        case .failed: "exclamationmark.triangle"
-        case .cancelled: "slash.circle"
-        case .skipped: "arrow.uturn.right"
-        }
-    }
-
-    private var color: Color {
-        switch job.state {
-        case .completed: Palette.statusGreen
-        case .failed: .red
-        case .running: Color.accentColor
-        default: Palette.textSecondary
         }
     }
 }

@@ -68,6 +68,8 @@ struct ManagerActions {
     var duplicate: (Connection) -> Void
     var delete: (Connection) -> Void
     var toggleFavorite: (Connection) -> Void
+    var sideBySide: (Connection) -> Void
+    var setMounted: (Connection, Bool) -> Void
 }
 
 struct ManagerTable: NSViewRepresentable {
@@ -287,8 +289,10 @@ final class ManagerTableCoordinator: NSObject, NSTableViewDataSource, NSTableVie
     }
 
     private func returnPressed(_ flags: NSEvent.ModifierFlags) {
-        // Option-Return (side by side) arrives with the side-by-side layout.
-        if flags.contains(.option) { return }
+        if flags.contains(.option) {
+            for c in selectedConnections() { parent?.actions.sideBySide(c) }
+            return
+        }
         for c in selectedConnections() { parent?.actions.connect(c, flags.contains(.command)) }
     }
 
@@ -307,16 +311,23 @@ final class ManagerTableCoordinator: NSObject, NSTableViewDataSource, NSTableVie
         }
         add("Connect", #selector(menuConnect))
         add("Open in New Tab", #selector(menuConnectNewTab))
+        add("Open Side by Side", #selector(menuSideBySide))
         menu.addItem(.separator())
         add("Edit\u{2026}", #selector(menuEdit))
         add("Duplicate", #selector(menuDuplicate))
         add("Toggle Favorite", #selector(menuFavorite))
+        let mounted = selectedConnections().first?.mountInFinder ?? false
+        add(mounted ? "Unmount from Finder" : "Mount in Finder", #selector(menuMount))
         menu.addItem(.separator())
         add("Delete\u{2026}", #selector(menuDelete))
     }
 
     @objc private func menuConnect() { for c in selectedConnections() { parent?.actions.connect(c, false) } }
     @objc private func menuConnectNewTab() { for c in selectedConnections() { parent?.actions.connect(c, true) } }
+    @objc private func menuSideBySide() { for c in selectedConnections() { parent?.actions.sideBySide(c) } }
+    @objc private func menuMount() {
+        for c in selectedConnections() { parent?.actions.setMounted(c, !c.mountInFinder) }
+    }
     @objc private func menuEdit() { if let c = selectedConnections().first { parent?.actions.edit(c) } }
     @objc private func menuDuplicate() { if let c = selectedConnections().first { parent?.actions.duplicate(c) } }
     @objc private func menuFavorite() { for c in selectedConnections() { parent?.actions.toggleFavorite(c) } }

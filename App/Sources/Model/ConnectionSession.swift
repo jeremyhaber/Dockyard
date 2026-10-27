@@ -40,7 +40,13 @@ final class ConnectionSession: Identifiable {
     private(set) var logVersion = 0
     /// Last failure from a file operation, shown in an alert.
     var operationError: String?
+    /// True while the SFTP subsystem runs as root (HANDOFF 6).
+    private(set) var browsingAsRoot = false
+    /// Set by "Browse files as root" in the terminal bar: the next connect elevates even if the site did not ask for it.
+    var rootBrowsingOverride = false
 
+    @ObservationIgnored private var terminalController: TerminalController?
+    @ObservationIgnored private var suppressedKinds: Set<OperationKind> = []
     @ObservationIgnored var onSessionChange: ((ConnectionSession) -> Void)?
     @ObservationIgnored var connectTask: Task<Void, Never>?
     @ObservationIgnored private var logTask: Task<Void, Never>?
@@ -52,7 +58,7 @@ final class ConnectionSession: Identifiable {
         let writer = RollingLogFileWriter(
             directory: AppPaths.logsDirectory,
             name: "\(name.isEmpty ? "connection" : name)-\(connection.id.uuidString.prefix(8))")
-        self.log = LogBuffer(fileWriter: DemoMode.isEnabled ? nil : writer)
+        self.log = LogBuffer(fileWriter: DemoMode.isEnabled || !AppSettings.logFilesEnabled ? nil : writer)
         self.logCounts = log.counts
         followLog()
     }
@@ -105,6 +111,8 @@ final class ConnectionSession: Identifiable {
     func teardown() async {
         local = nil
         server = nil
+        browsingAsRoot = false
+        await terminalController?.stop()
         let current = fs
         fs = nil
         await current?.disconnect()
@@ -112,6 +120,29 @@ final class ConnectionSession: Identifiable {
     }
 
     func markDisconnected() { status = .disconnected }
+
+    func setBrowsingAsRoot(_ value: Bool) { browsingAsRoot = value }
+
+    // MARK: Terminal
+
+    var shellAvailable: Bool { fs?.supportsShell ?? false }
+
+    func terminal() -> TerminalController {
+        if let terminalController { return terminalController }
+        let created = TerminalController(session: self)
+        terminalController = created
+        return created
+    }
+
+    /// Opens a shell on the existing connection (no second login).
+    func openShell(cols: Int, rows: Int) async throws -> any ShellBackend {
+        guard let fs else { throw RemoteError.notConnected }
+        if let sftp = fs as? SFTPFileSystem { return try await sftp.openShell(cols: cols, rows: rows) }
+        if let demo = fs as? DemoFileSystem, demo.supportsShell {
+            return DemoShell(host: connection.host, user: connection.username, elevated: connection.elevation != .none)
+        }
+        throw RemoteError.unsupported("This connection has no shell")
+    }
 
     // MARK: Panes
 
@@ -155,67 +186,101 @@ final class ConnectionSession: Identifiable {
     }
 
     func createFolder(named name: String, in side: PaneSide) async {
+        guard await authorize(.mkdir, paths: [name], side: side) else { return }
         await run("New folder", side: side) { pane in
             let path = RemotePath.join(pane.currentPath, name)
             try await pane.fs.mkdir(path)
             if side == .local { self.log.append(.status, "Created local folder \(path)") }
+            self.record(ChangeEntry(scope: self.scope(side), kind: .newFolder, toPath: path, isDirectory: true), side: side)
         }
     }
 
     func rename(_ item: RemoteItem, to newName: String, in side: PaneSide) async {
         guard newName != item.name, !newName.isEmpty else { return }
+        guard await authorize(.rename, paths: [item.path], side: side) else { return }
         await run("Rename", side: side) { pane in
             let target = RemotePath.join(RemotePath.parent(of: item.path), newName)
             try await pane.fs.rename(item.path, target)
             if side == .local { self.log.append(.status, "Renamed \(item.path) to \(target)") }
+            self.record(
+                ChangeEntry(scope: self.scope(side), kind: .rename, fromPath: item.path, toPath: target, isDirectory: item.isDirectory),
+                side: side)
         }
     }
 
+    /// Server deletes are real deletes. Local deletes go to the macOS Trash.
     func delete(_ items: [RemoteItem], in side: PaneSide) async {
+        guard await authorize(.delete, paths: items.map(\.path), side: side) else { return }
         await run("Delete", side: side) { pane in
             for item in items {
-                try await pane.fs.delete(item.path, recursive: item.isDirectory)
-                if side == .local { self.log.append(.status, "Deleted \(item.path)") }
+                if side == .local, !DemoMode.isEnabled {
+                    try FileManager.default.trashItem(at: URL(fileURLWithPath: item.path), resultingItemURL: nil)
+                    self.log.append(.status, "Moved \(item.path) to the Trash")
+                } else {
+                    try await pane.fs.delete(item.path, recursive: item.isDirectory)
+                    if side == .local { self.log.append(.status, "Deleted \(item.path)") }
+                }
             }
         }
     }
 
     func chmod(_ items: [RemoteItem], mode: UInt16, in side: PaneSide) async {
+        guard await authorize(.chmod, paths: items.map(\.path), side: side) else { return }
         await run("Change permissions", side: side) { pane in
-            for item in items { try await pane.fs.chmod(item.path, mode: mode) }
+            for item in items {
+                try await pane.fs.chmod(item.path, mode: mode)
+                guard let previous = item.permissions else { continue }
+                self.record(
+                    ChangeEntry(scope: self.scope(side), kind: .chmod, toPath: item.path, isDirectory: item.isDirectory, previousMode: previous, newMode: mode),
+                    side: side, toast: false)
+            }
         }
     }
 
     /// Moves items to another folder on the same file system.
     func move(_ items: [RemoteItem], to directory: String, in side: PaneSide) async {
+        guard await authorize(.move, paths: items.map(\.path), side: side) else { return }
         await run("Move", side: side) { pane in
             for item in items {
-                try await pane.fs.rename(item.path, RemotePath.join(directory, item.name))
+                let target = RemotePath.join(directory, item.name)
+                try await pane.fs.rename(item.path, target)
+                self.record(
+                    ChangeEntry(scope: self.scope(side), kind: .move, fromPath: item.path, toPath: target, isDirectory: item.isDirectory),
+                    side: side)
             }
         }
     }
 
-    /// Downloads one file to a temporary folder so the caller can open it.
-    func fetchForOpening(_ item: RemoteItem) async throws -> URL {
-        guard let fs else { throw RemoteError.notConnected }
-        let folder = FileManager.default.temporaryDirectory
-            .appendingPathComponent("dockyard-open", isDirectory: true)
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let url = folder.appendingPathComponent(item.name)
-        let progress = Progress(totalUnitCount: Int64(item.size ?? 0))
-        try await fs.download(item.path, to: url, progress: progress)
-        return url
+    // MARK: Guardrails
+
+    /// Read-only refusals and PROD confirmations for server writes. Local operations are never guarded.
+    func authorize(_ kind: OperationKind, paths: [String], side: PaneSide = .server) async -> Bool {
+        guard side == .server else { return true }
+        switch Guardrails.decide(GuardedOperation(kind, paths: paths), for: connection, suppressed: suppressedKinds) {
+        case .allow:
+            return true
+        case .deny(let reason):
+            log.append(.warning, reason)
+            operationError = reason
+            return false
+        case .confirm(let summary):
+            var message = "\(connection.name) is a PROD site."
+            if summary.hiddenCount > 0 { message += " \(summary.hiddenCount) more are not listed." }
+            let request = ConfirmRequest(
+                title: summary.title, message: message, confirmTitle: kind == .delete ? "Delete" : "Overwrite",
+                items: summary.items, suppressTitle: summary.canSuppressForSession ? "Don\u{2019}t ask again for this session" : nil)
+            let answer = await AppModel.shared.prompts.askConfirmDetailed(request)
+            if answer.confirmed, answer.suppress { suppressedKinds.insert(kind) }
+            return answer.confirmed
+        }
     }
 
-    func queueTransfer(
-        _ items: [RemoteItem], from source: PaneSide, to destination: PaneSide, directory: String,
-        move: Bool, queue: TransferQueue
-    ) {
-        guard !items.isEmpty else { return }
-        let src = endpoint(source), dst = endpoint(destination)
-        Task {
-            _ = await queue.enqueue(items: items, from: src, to: dst, into: directory, move: move)
-        }
+    // MARK: Journal
+
+    /// The change journal scope of one of this session's panes.
+    func scope(_ side: PaneSide) -> UUID { side == .local ? ChangeEntry.localScope : connection.id }
+
+    private func record(_ entry: ChangeEntry, side: PaneSide, toast: Bool = true) {
+        AppModel.shared.recordChange(entry, session: self, side: side, toast: toast)
     }
 }

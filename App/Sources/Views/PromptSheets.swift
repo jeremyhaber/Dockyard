@@ -10,7 +10,53 @@ struct PromptSheet: View {
         case .conflict(let request): ConflictSheet(request: request)
         case .password(let request): PasswordSheet(request: request)
         case .hostKey(let request): HostKeySheet(request: request)
+        case .confirm(let request): ConfirmSheet(request: request)
         }
+    }
+}
+
+struct ConfirmSheet: View {
+    @Environment(AppModel.self) private var app
+    let request: ConfirmRequest
+    @State private var suppress = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: request.symbol)
+                    .font(.system(size: 26))
+                    .foregroundStyle(Palette.statusAmber)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(request.title).font(.headline)
+                    Text(request.message).foregroundStyle(Palette.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            if !request.items.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(request.items, id: \.self) { item in
+                        Text(item).font(.monoSmall).lineLimit(1).truncationMode(.middle)
+                    }
+                }
+                .padding(8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Palette.chrome, in: RoundedRectangle(cornerRadius: 6))
+            }
+            if let title = request.suppressTitle {
+                Toggle(title, isOn: $suppress).toggleStyle(.checkbox)
+            }
+            HStack {
+                Spacer()
+                Button(request.cancelTitle) { app.prompts.resolveConfirm(request.id, confirmed: false) }
+                    .keyboardShortcut(.cancelAction)
+                Button(request.confirmTitle) { app.prompts.resolveConfirm(request.id, confirmed: true, suppress: suppress) }
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(20)
+        .frame(width: 460)
+        .interactiveDismissDisabled()
     }
 }
 

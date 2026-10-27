@@ -62,6 +62,9 @@ struct SiteDraft {
     var mountInFinder = false
     var mountOnLaunch = false
     var mountReadOnly = false
+    var readOnly = false
+    var maxConnections = Connection.defaultMaxConnections
+    var connectDelayMs = 0
     var localFolder = ""
     var restoreSession = true
 
@@ -102,6 +105,9 @@ struct SiteDraft {
         mountInFinder = c.mountInFinder
         mountOnLaunch = c.mountOnLaunch
         mountReadOnly = c.mountReadOnly
+        readOnly = c.readOnly
+        maxConnections = c.maxConnections
+        connectDelayMs = c.connectDelayMs
         localFolder = c.localFolder ?? ""
         restoreSession = c.restoreSession
         if let cloud = c.cloud {
@@ -162,6 +168,9 @@ struct SiteDraft {
         c.mountInFinder = mountInFinder
         c.mountOnLaunch = mountOnLaunch
         c.mountReadOnly = mountReadOnly
+        c.readOnly = readOnly
+        c.maxConnections = min(max(maxConnections, Connection.maxConnectionsRange.lowerBound), Connection.maxConnectionsRange.upperBound)
+        c.connectDelayMs = max(0, connectDelayMs)
         c.localFolder = localFolder.trimmingCharacters(in: .whitespaces).isEmpty ? nil : localFolder
         c.restoreSession = restoreSession
         c.cloud = isCloud ? cloudPreset.spec(root: cloudRoot, region: cloudRegion) : nil

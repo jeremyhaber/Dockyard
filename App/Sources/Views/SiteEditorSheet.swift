@@ -41,7 +41,7 @@ struct SiteEditorSheet: View {
             Divider()
             buttons
         }
-        .frame(width: 600, height: 700)
+        .frame(width: 600, height: 620)
         .task {
             clientFolders = (try? await app.folders.all()) ?? []
             if let id = request.connection?.id {
@@ -70,11 +70,8 @@ struct SiteEditorSheet: View {
             .pickerStyle(.segmented)
             if draft.protocolChoice != .cloud {
                 TextField("Host", text: $draft.host)
-                HStack {
-                    TextField("Port", text: $draft.port, prompt: Text(String(draft.protocolChoice.connectionProtocol.defaultPort)))
-                        .frame(maxWidth: 140)
-                    TextField("User", text: $draft.username)
-                }
+                TextField("Port", text: $draft.port, prompt: Text(String(draft.protocolChoice.connectionProtocol.defaultPort)))
+                TextField("User", text: $draft.username)
             }
         }
     }
@@ -152,13 +149,16 @@ struct SiteEditorSheet: View {
             Toggle("Mount in Finder", isOn: $draft.mountInFinder)
             Toggle("Mount when Dockyard opens", isOn: $draft.mountOnLaunch)
             Toggle("Read-only mount", isOn: $draft.mountReadOnly)
-            Text("Saved with the connection. Mounting arrives with the Finder extension.")
+            Text("Saving mounts the connection under Locations in Finder. PROD sites mount read-only by default, and mounts never use su or sudo.")
                 .font(.caption).foregroundStyle(Palette.textSecondary)
         }
     }
 
     private var otherSection: some View {
         Section("Other") {
+            Toggle("Read-only site", isOn: $draft.readOnly)
+            Text("Blocks uploads, deletes, renames and permission changes, and shows a lock on the connection tab.")
+                .font(.caption).foregroundStyle(Palette.textSecondary)
             Toggle("Production site (PROD)", isOn: Binding(
                 get: { draft.isProd },
                 set: { value in
@@ -169,7 +169,12 @@ struct SiteEditorSheet: View {
                 TextField("Local folder", text: $draft.localFolder, prompt: Text("Default: your home folder"))
                 Button("Choose\u{2026}") { chooseLocalFolder() }
             }
-            // TODO: "Max connections" (1-10) and "Delay between new connections (ms)" once Connection has those fields.
+            Stepper(value: $draft.maxConnections, in: Connection.maxConnectionsRange) {
+                LabeledContent("Max connections", value: "\(draft.maxConnections)")
+            }
+            Stepper(value: $draft.connectDelayMs, in: 0...10_000, step: 100) {
+                LabeledContent("Delay between new connections", value: "\(draft.connectDelayMs) ms")
+            }
             Toggle("On connect: restore last session", isOn: $draft.restoreSession)
             Toggle("Favorite", isOn: $draft.favorite)
             TextField("Tags", text: $draft.tags, prompt: Text("Comma separated"))

@@ -90,6 +90,7 @@ extension AppModel {
     func cancelTransfer(_ id: UUID) { let q = queue; Task { await q.cancel(id) } }
     func retryTransfer(_ id: UUID) { let q = queue; Task { await q.retry(id) } }
     func retryFailedTransfers() { let q = queue; Task { await q.retryFailed() } }
+    func setTransfersPaused(_ paused: Bool) { let q = queue; Task { if paused { await q.pause() } else { await q.resume() } } }
     func clearFinishedTransfers() { let q = queue; Task { await q.removeFinished() } }
     func cancelAllTransfers() { let q = queue; Task { await q.cancelAll() } }
 }

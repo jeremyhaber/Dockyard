@@ -1,43 +1,50 @@
 import ConnectionKit
 import Foundation
 
-/// Launch switches for the screenshot demo: `-DockyardDemo YES` or `DOCKYARD_DEMO=1`.
-enum DemoMode {
-    static let isEnabled: Bool = {
-        UserDefaults.standard.bool(forKey: "DockyardDemo") || ProcessInfo.processInfo.environment["DOCKYARD_DEMO"] == "1"
-    }()
-
-    /// `-DockyardDemoScreen main|connectionManager|siteEditor|logDrawer|jump`
-    static let screen: String = UserDefaults.standard.string(forKey: "DockyardDemoScreen") ?? "main"
-
-    /// All demo timestamps hang off this instant so the data does not drift between runs.
-    static let anchor = Date(timeIntervalSince1970: 1_792_929_600)  // 2026-10-25 12:00 UTC
-}
-
 /// An in-memory file system with a plausible tree. Used for both panes in demo mode; no network, no disk.
 final class DemoFileSystem: RemoteFileSystem {
     enum Kind { case server, local }
+    enum Flavor { case acme, bluebird }
 
     private struct State {
         var folders: [String: [RemoteItem]]
     }
 
     private let kind: Kind
+    private let flavor: Flavor
+    private let shell: Bool
+    let browsesAsRoot: Bool
     private let hub = LogHub()
     private let state: LockedBox<State>
 
     var logStream: AsyncStream<LogLine> { hub.stream() }
-    var supportsShell: Bool { false }
+    var supportsShell: Bool { shell }
 
-    init(kind: Kind) {
+    init(kind: Kind, flavor: Flavor = .acme, shell: Bool = false, browsesAsRoot: Bool = false) {
         self.kind = kind
-        state = LockedBox(State(folders: kind == .server ? Self.serverTree() : Self.localTree()))
+        self.flavor = flavor
+        self.shell = shell
+        self.browsesAsRoot = browsesAsRoot
+        let folders: [String: [RemoteItem]]
+        switch (kind, flavor) {
+        case (.local, _): folders = Self.localTree()
+        case (.server, .acme): folders = Self.serverTree()
+        case (.server, .bluebird): folders = Self.bluebirdTree()
+        }
+        state = LockedBox(State(folders: folders))
     }
 
     // MARK: RemoteFileSystem
 
     func connect() async throws {
         guard kind == .server else { return }
+        if flavor == .bluebird {
+            hub.emit(.status, "Connecting to bluebirdbakery.example:22...")
+            hub.emit(.status, "Host key ssh-ed25519 trusted")
+            hub.emit(.status, "Authenticated with publickey, then password")
+            hub.emit(.status, browsesAsRoot ? "Browsing files as root" : "SFTP subsystem ready")
+            return
+        }
         hub.emit(.status, "Resolving ftp.acmecorp.example")
         hub.emit(.status, "Connecting to 203.0.113.24:21...")
         hub.emit(.response, "220 ProFTPD Server (acmecorp) ready.")
@@ -57,12 +64,20 @@ final class DemoFileSystem: RemoteFileSystem {
 
     func disconnect() async {}
 
-    func homeDirectory() async throws -> String { kind == .server ? "/home/acme" : "/Users/demo" }
+    func homeDirectory() async throws -> String {
+        switch (kind, flavor) {
+        case (.local, _): "/Users/demo"
+        case (.server, .acme): "/home/acme"
+        case (.server, .bluebird): "/home/bluebird"
+        }
+    }
 
     func list(_ path: String) async throws -> [RemoteItem] {
         let normalized = path.count > 1 && path.hasSuffix("/") ? String(path.dropLast()) : path
         guard let items = state.withLock({ $0.folders[normalized] }) else { throw RemoteError.notFound(path) }
-        if kind == .server {
+        if kind == .server, flavor == .bluebird {
+            hub.emit(.status, "Listing directory \(normalized)")
+        } else if kind == .server {
             hub.emit(.command, "PASV")
             hub.emit(.response, "227 Entering Passive Mode (203,0,113,24,195,80)")
             hub.emit(.command, "MLSD \(normalized)")
@@ -186,6 +201,39 @@ final class DemoFileSystem: RemoteFileSystem {
         t["\(home)/mail"] = []
         t["\(home)/ssl"] = [file("\(home)/ssl", "acmecorp.example.crt", size: 3_412, ageDays: 60, perms: 0o600)]
         t["\(home)/tmp"] = []
+        return t
+    }
+
+    private static func bluebirdTree() -> [String: [RemoteItem]] {
+        var t: [String: [RemoteItem]] = [:]
+        let home = "/home/bluebird"
+        let www = "\(home)/public_html"
+        t["/"] = [dir("/", "home", ageDays: 400), dir("/", "etc", ageDays: 400), dir("/", "var", ageDays: 400)]
+        t["/home"] = [dir("/home", "bluebird", ageDays: 1)]
+        t["/etc"] = []
+        t["/var"] = []
+        t[home] = [
+            dir(home, "public_html", ageDays: 0), dir(home, "backups", ageDays: 2), dir(home, "logs", ageDays: 0),
+            file(home, ".bashrc", size: 231, ageDays: 300),
+        ]
+        t[www] = [
+            dir(www, "shop", ageDays: 1), dir(www, "wp-content", ageDays: 2), dir(www, "menu", ageDays: 9),
+            file(www, "index.php", size: 405, ageDays: 40), file(www, "wp-config.php", size: 3_201, ageDays: 20, perms: 0o640),
+            file(www, "order-export.csv", size: 82_144, ageDays: 1), file(www, "robots.txt", size: 180, ageDays: 90),
+        ]
+        t["\(www)/shop"] = [
+            file("\(www)/shop", "cart.php", size: 12_880, ageDays: 1), file("\(www)/shop", "checkout.php", size: 9_412, ageDays: 3),
+        ]
+        t["\(www)/wp-content"] = [dir("\(www)/wp-content", "uploads", ageDays: 1), dir("\(www)/wp-content", "themes", ageDays: 30)]
+        t["\(www)/wp-content/uploads"] = []
+        t["\(www)/wp-content/themes"] = []
+        t["\(www)/menu"] = [
+            file("\(www)/menu", "spring.pdf", size: 412_300, ageDays: 9), file("\(www)/menu", "winter.pdf", size: 398_114, ageDays: 40),
+        ]
+        t["\(home)/backups"] = [file("\(home)/backups", "shop-2026-10-24.tar.gz", size: 212_000_000, ageDays: 2, perms: 0o600)]
+        t["\(home)/logs"] = [
+            file("\(home)/logs", "access.log", size: 5_204_113, ageDays: 0), file("\(home)/logs", "error.log", size: 31_880, ageDays: 0),
+        ]
         return t
     }
 

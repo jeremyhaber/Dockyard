@@ -4,6 +4,7 @@ import DockyardCore
 import SwiftUI
 
 struct PaneView: View {
+    @Environment(AppModel.self) private var app
     let pane: PaneModel
     let session: ConnectionSession
     @AppStorage("treeHeight") private var treeHeight = 190.0
@@ -14,12 +15,14 @@ struct PaneView: View {
             PathBar(pane: pane, session: session)
             Divider()
             FolderTreeView(pane: pane, session: session, version: pane.treeSignature)
-                .frame(height: treeHeight)
+                .frame(minHeight: 50, idealHeight: treeHeight, maxHeight: treeHeight)
+                .layoutPriority(-1)
             resizeHandle
             FolderTabsBar(pane: pane)
             Divider()
             ZStack {
                 FileTableView(pane: pane, session: session, version: pane.rowsVersion, sort: pane.sort)
+                    .frame(minHeight: 60)
                 if let message = pane.errorMessage {
                     VStack(spacing: 6) {
                         Image(systemName: "exclamationmark.triangle")
@@ -36,6 +39,9 @@ struct PaneView: View {
                     .background(Palette.ground.opacity(0.95), in: RoundedRectangle(cornerRadius: 8))
                 } else if pane.isLoading && pane.rows.isEmpty {
                     ProgressView().controlSize(.small)
+                }
+                if let hint = app.dropHint, hint.paneID == pane.id {
+                    DropHintView(text: hint.text)
                 }
             }
             Divider()
@@ -150,6 +156,7 @@ struct PathBar: View {
     @State private var editing = false
     @State private var text = ""
     @State private var showHistory = false
+    @State private var showRecent = false
     @FocusState private var fieldFocused: Bool
 
     var body: some View {
@@ -167,6 +174,10 @@ struct PathBar: View {
                 .help("Up one folder (\u{2318}\u{2191})")
                 .accessibilityLabel("Up one folder")
             pathArea
+            if pane.side == .server, session.browsingAsRoot {
+                Badge(text: "ROOT", style: .root)
+                    .help("Browsing files as root")
+            }
             if pane.side == .server {
                 Button { showHistory.toggle() } label: { Image(systemName: "clock.arrow.circlepath") }
                     .help("Folder history (\u{2318}Y)")
@@ -175,6 +186,12 @@ struct PathBar: View {
                         HistoryPopover(pane: pane, session: session) { showHistory = false }
                     }
             }
+            Button { showRecent.toggle() } label: { Image(systemName: "arrow.uturn.backward.circle") }
+                .help("Recent changes and Undo")
+                .accessibilityLabel("Recent changes")
+                .popover(isPresented: $showRecent, arrowEdge: .bottom) {
+                    RecentChangesPopover(pane: pane, session: session) { showRecent = false }
+                }
         }
         .buttonStyle(.borderless)
         .padding(.horizontal, 8)
@@ -182,6 +199,7 @@ struct PathBar: View {
         .background(Palette.chrome)
         .onChange(of: pane.pathEditToken) { beginEditing() }
         .onChange(of: pane.historyToken) { if pane.side == .server { showHistory = true } }
+        .onChange(of: pane.recentToken) { showRecent = true }
     }
 
     @ViewBuilder
@@ -200,33 +218,8 @@ struct PathBar: View {
                     .controlSize(.small)
             }
         } else {
-            GeometryReader { geo in
-                ScrollView(.horizontal) {
-                    HStack(spacing: 0) {
-                        ForEach(pane.state.breadcrumbs) { segment in
-                            Button(segment.title) { pane.navigate(to: segment.path) }
-                                .buttonStyle(.plain)
-                                .font(.system(size: 12, design: .monospaced))
-                                .padding(.horizontal, 3)
-                                .padding(.vertical, 2)
-                                .contentShape(Rectangle())
-                            if segment.path != pane.currentPath {
-                                Image(systemName: "chevron.right")
-                                    .font(.system(size: 8, weight: .semibold))
-                                    .foregroundStyle(Palette.textSecondary)
-                            }
-                        }
-                        Color.clear
-                            .frame(minWidth: 24, maxWidth: .infinity)
-                            .contentShape(Rectangle())
-                            .onTapGesture { beginEditing() }
-                    }
-                    .frame(minWidth: geo.size.width, alignment: .leading)
-                }
-                .scrollIndicators(.hidden)
-                .defaultScrollAnchor(.trailing)
-            }
-            .frame(height: 22)
+            BreadcrumbBar(pane: pane, onEmptyTap: beginEditing)
+                .frame(height: 22)
             .accessibilityLabel("Path: \(pane.currentPath)")
         }
     }

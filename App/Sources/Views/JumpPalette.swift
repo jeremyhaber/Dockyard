@@ -22,7 +22,9 @@ struct JumpPalette: View {
                         .textFieldStyle(.plain)
                         .font(.system(size: 16))
                         .focused($focused)
-                        .onSubmit { activate(hits.indices.contains(selected) ? hits[selected] : nil) }
+                        .onSubmit {
+                            if hits.isEmpty, showsRecentChanges { showRecentChanges() } else { activate(hits.indices.contains(selected) ? hits[selected] : nil) }
+                        }
                         .onKeyPress(.upArrow) { move(-1); return .handled }
                         .onKeyPress(.downArrow) { move(1); return .handled }
                         .onKeyPress(.escape) { close(); return .handled }
@@ -30,6 +32,21 @@ struct JumpPalette: View {
                 }
                 .padding(14)
                 Divider()
+                if showsRecentChanges {
+                    Button { showRecentChanges() } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: "arrow.uturn.backward.circle").foregroundStyle(Color.accentColor)
+                            Text("Recent changes").font(.system(size: 13, weight: .medium))
+                            Text("Undo moves, renames and copies").font(.system(size: 11)).foregroundStyle(Palette.textSecondary)
+                            Spacer()
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 6)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    Divider()
+                }
                 if hits.isEmpty {
                     Text(query.isEmpty ? "Type to search connections and recent folders" : "No matches")
                         .foregroundStyle(Palette.textSecondary)
@@ -110,6 +127,17 @@ struct JumpPalette: View {
     private func move(_ delta: Int) {
         guard !hits.isEmpty else { return }
         selected = min(max(0, selected + delta), hits.count - 1)
+    }
+
+    private var showsRecentChanges: Bool {
+        let q = query.lowercased()
+        return app.activeSession?.server != nil && ["recent", "undo", "changes", "history of changes"].contains { $0.hasPrefix(q) && !q.isEmpty || q.hasPrefix($0) }
+    }
+
+    private func showRecentChanges() {
+        let pane = app.activeSession.flatMap { $0.pane(app.focusedSide) ?? $0.server }
+        close()
+        pane?.requestRecentChanges()
     }
 
     private func close() { app.jumpVisible = false }
