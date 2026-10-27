@@ -1,0 +1,99 @@
+import DockyardCore
+import Foundation
+import Observation
+
+struct ConflictRequest: Identifiable, Equatable {
+    let id = UUID()
+    let info: ConflictInfo
+}
+
+struct PasswordRequest: Identifiable, Equatable {
+    let id = UUID()
+    var title: String
+    var message: String
+    var fieldLabel: String
+    var allowsEmpty = false
+}
+
+struct HostKeyRequest: Identifiable, Equatable {
+    let id = UUID()
+    var host: String
+    var port: Int
+    var algorithm: String
+    var fingerprint: String
+    /// Set when a different key was trusted before.
+    var previousFingerprint: String?
+}
+
+enum ActivePrompt: Identifiable, Equatable {
+    case conflict(ConflictRequest)
+    case password(PasswordRequest)
+    case hostKey(HostKeyRequest)
+
+    var id: UUID {
+        switch self {
+        case .conflict(let r): r.id
+        case .password(let r): r.id
+        case .hostKey(let r): r.id
+        }
+    }
+}
+
+/// Modal questions from background work (transfers, connecting). Each `ask` suspends until the sheet is answered.
+@MainActor @Observable
+final class PromptCenter {
+    private(set) var conflicts: [ConflictRequest] = []
+    private(set) var passwords: [PasswordRequest] = []
+    private(set) var hostKeys: [HostKeyRequest] = []
+
+    @ObservationIgnored private var conflictWaiters: [UUID: CheckedContinuation<ConflictDecision, Never>] = [:]
+    @ObservationIgnored private var passwordWaiters: [UUID: CheckedContinuation<String?, Never>] = [:]
+    @ObservationIgnored private var hostKeyWaiters: [UUID: CheckedContinuation<Bool, Never>] = [:]
+
+    nonisolated init() {}
+
+    var active: ActivePrompt? {
+        if let r = hostKeys.first { return .hostKey(r) }
+        if let r = passwords.first { return .password(r) }
+        if let r = conflicts.first { return .conflict(r) }
+        return nil
+    }
+
+    func askConflict(_ info: ConflictInfo) async -> ConflictDecision {
+        let request = ConflictRequest(info: info)
+        return await withCheckedContinuation { continuation in
+            conflictWaiters[request.id] = continuation
+            conflicts.append(request)
+        }
+    }
+
+    func resolveConflict(_ id: UUID, _ decision: ConflictDecision) {
+        conflicts.removeAll { $0.id == id }
+        conflictWaiters.removeValue(forKey: id)?.resume(returning: decision)
+    }
+
+    /// Returns nil when the user cancels.
+    func askPassword(_ request: PasswordRequest) async -> String? {
+        await withCheckedContinuation { continuation in
+            passwordWaiters[request.id] = continuation
+            passwords.append(request)
+        }
+    }
+
+    func resolvePassword(_ id: UUID, _ value: String?) {
+        passwords.removeAll { $0.id == id }
+        passwordWaiters.removeValue(forKey: id)?.resume(returning: value)
+    }
+
+    func askHostKey(_ request: HostKeyRequest) async -> Bool {
+        await withCheckedContinuation { continuation in
+            hostKeyWaiters[request.id] = continuation
+            hostKeys.append(request)
+        }
+    }
+
+    func resolveHostKey(_ id: UUID, trust: Bool) {
+        hostKeys.removeAll { $0.id == id }
+        hostKeyWaiters.removeValue(forKey: id)?.resume(returning: trust)
+    }
+}

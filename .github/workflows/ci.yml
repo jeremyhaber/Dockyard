@@ -39,3 +39,31 @@ jobs:
       - name: RcloneKit tests with the real library
         working-directory: Packages/RcloneKit
         run: DOCKYARD_LIBRCLONE="$GITHUB_WORKSPACE/build/librclone/librclone.dylib" swift test
+
+  app-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate project
+        working-directory: App
+        run: xcodegen
+      - name: Build app
+        working-directory: App
+        run: |
+          set -o pipefail
+          xcodebuild -scheme Dockyard -configuration Debug -destination 'platform=macOS' \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" CODE_SIGNING_ALLOWED=NO build 2>&1 \
+            | tee "$RUNNER_TEMP/xcodebuild.log" | tail -n 40
+          test -d "$RUNNER_TEMP/DerivedData/Build/Products/Debug/Dockyard.app"
+      - name: Compiler diagnostics
+        if: always()
+        run: |
+          grep -E "error:" "$RUNNER_TEMP/xcodebuild.log" | sort -u | head -60 | while IFS= read -r line; do echo "::error::$line"; done
+          grep -E "warning:" "$RUNNER_TEMP/xcodebuild.log" | grep -v "Node.js" | sort -u | head -60 | while IFS= read -r line; do echo "::warning::$line"; done
+          true

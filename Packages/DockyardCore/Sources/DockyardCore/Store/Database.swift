@@ -111,6 +111,22 @@ public final class DockyardDatabase: Sendable {
                 t.column("sortOrder", .integer).notNull().defaults(to: 0)
             }
         }
+        migrator.registerMigration("v2") { db in
+            try db.alter(table: "connection") { t in
+                t.add(column: "localFolder", .text)
+                t.add(column: "cloudBackend", .text)
+                t.add(column: "cloudOptions", .text)
+                t.add(column: "cloudRoot", .text)
+            }
+            try db.create(table: "knownHost") { t in
+                t.column("host", .text).notNull()
+                t.column("port", .integer).notNull()
+                t.column("keyType", .text).notNull()
+                t.column("fingerprint", .text).notNull()
+                t.column("firstSeenAt", .datetime).notNull()
+                t.primaryKey(["host", "port", "keyType"])
+            }
+        }
         return migrator
     }
 }
