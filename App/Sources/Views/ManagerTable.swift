@@ -131,13 +131,13 @@ final class ManagerTableCoordinator: NSObject, NSTableViewDataSource, NSTableVie
             if sortable { c.sortDescriptorPrototype = NSSortDescriptor(key: id, ascending: true) }
             table.addTableColumn(c)
         }
-        column("star", "\u{2605}", width: 30)
-        column("name", "Name", width: 190)
-        column("host", "Host", width: 140)
-        column("protocol", "Protocol", width: 62)
-        column("source", "Source", width: 128)
-        column("last", "Last used", width: 84)
-        column("status", "Status", width: 175)
+        column("star", "\u{2605}", width: 28)
+        column("name", "Name", width: 160)
+        column("host", "Host", width: 122)
+        column("protocol", "Protocol", width: 56)
+        column("source", "Source", width: 108)
+        column("last", "Last used", width: 76)
+        column("status", "Status", width: 160)
         table.columnAutoresizingStyle = .firstColumnOnlyAutoresizingStyle
         table.tableColumns[1].resizingMask = .autoresizingMask
         table.sortDescriptors = [NSSortDescriptor(key: "name", ascending: true)]
