@@ -33,6 +33,7 @@ enum DemoSeeder {
         list.append(Connection(
             id: id(1), name: "Acme Corp", clientFolderId: folderIDs["Acme Corp"], protocol: .ftp, host: "ftp.acmecorp.example",
             username: "acme", isProd: true, favorite: true, tags: ["wordpress", "prod"], notes: "Main marketing site.",
+            mountInFinder: true, mountOnLaunch: true,
             lastConnectedAt: ago(0.5 * hour), createdAt: ago(200 * day), initialRemotePath: "/home/acme/public_html",
             localFolder: "/Users/demo/Sites/acme"))
         list.append(Connection(
@@ -99,6 +100,14 @@ enum DemoSeeder {
 
         try? await app.connections.save(list)
 
+        let snippets = [
+            ("Tail the error log", "tail -f /var/log/nginx/error.log"), ("Disk usage here", "du -sh * | sort -h"),
+            ("Restart PHP-FPM", "sudo systemctl restart php8.3-fpm"), ("Who is logged in", "w"),
+        ]
+        for (i, entry) in snippets.enumerated() {
+            try? await app.snippets.save(Snippet(name: entry.0, command: entry.1, sortOrder: i))
+        }
+
         // A saved session for the open connection: 3 server and 2 local folders, one of them gone.
         let www = "/home/acme/public_html"
         let state = SessionState(
@@ -120,18 +129,39 @@ enum DemoSeeder {
         app.open(acme)
         for session in app.sessions where session.connection.id == acme.id { app.activate(session) }
 
-        try? await Task.sleep(nanoseconds: 900_000_000)
-        enqueueTransfers(app)
+        for _ in 0..<50 where !app.sessions.allSatisfy({ $0.status.isConnected }) {
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+        try? await Task.sleep(nanoseconds: 500_000_000)
+        enqueueTransfers(app, relay: DemoMode.screen == "sideBySide")
+        await seedJournal(app, scope: acme.id)
         if let session = app.session(for: acme.id) {
             session.log.append(.command, "STOR archive-2026.zip")
             session.log.append(.error, "550 archive-2026.zip: Permission denied")
         }
-        applyScreen(app)
+        await applyScreen(app)
     }
 
-    private static func enqueueTransfers(_ app: AppModel) {
+    /// A few recent changes on Acme so the "Recent changes" list is not empty.
+    private static func seedJournal(_ app: AppModel, scope: UUID) async {
+        let www = "/home/acme/public_html"
+        let now = Date()
+        let entries = [
+            ChangeEntry(scope: scope, kind: .upload, toPath: "\(www)/hero-banner.jpg", createdSize: 1_204_881, createdModified: now, time: now.addingTimeInterval(-2 * 3_600)),
+            ChangeEntry(scope: scope, kind: .chmod, toPath: "\(www)/wp-config.php", previousMode: 0o644, newMode: 0o640, time: now.addingTimeInterval(-3_600)),
+            ChangeEntry(scope: scope, kind: .newFolder, toPath: "\(www)/old-site", isDirectory: true, time: now.addingTimeInterval(-14 * 60)),
+            ChangeEntry(scope: scope, kind: .rename, fromPath: "\(www)/style.css", toPath: "\(www)/style-old.css", time: now.addingTimeInterval(-11 * 60)),
+            ChangeEntry(scope: scope, kind: .move, fromPath: "\(www)/images", toPath: "\(www)/old-site/images", isDirectory: true, time: now.addingTimeInterval(-3 * 60)),
+        ]
+        for entry in entries { _ = try? await app.journal.record(entry) }
+        await app.refreshUndoState()
+    }
+
+    private static func enqueueTransfers(_ app: AppModel, relay: Bool) {
         let source = TransferEndpoint(fs: DemoFileSystem(kind: .server), label: "Acme Corp")
-        let target = TransferEndpoint.thisMac()
+        let target = relay
+            ? TransferEndpoint(fs: DemoFileSystem(kind: .server, flavor: .bluebird), label: "Bluebird Bakery")
+            : TransferEndpoint.thisMac()
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("dockyard-demo").path
         try? FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
         let files: [(String, UInt64)] = [
@@ -146,8 +176,10 @@ enum DemoSeeder {
         Task { _ = await queue.enqueue(requests) }
     }
 
-    /// Opens the screen named by `-DockyardDemoScreen`. `connectionManager` is handled by the main window.
-    static func applyScreen(_ app: AppModel) {
+    /// Opens the screen named by `-DockyardDemoScreen`. `connectionManager` and `settings` are handled by the main window.
+    static func applyScreen(_ app: AppModel) async {
+        let acme = app.session(for: id(1))
+        let bluebird = app.session(for: id(2))
         switch DemoMode.screen {
         case "logDrawer":
             app.drawerTab = .log
@@ -156,6 +188,29 @@ enum DemoSeeder {
             app.jumpVisible = true
         case "siteEditor":
             if let c = app.allConnections.first(where: { $0.id == id(2) }) { app.editConnection(c, origin: .main) }
+        case "terminal":
+            if let bluebird { app.activate(bluebird) }
+            app.drawerTab = .terminal
+            app.drawerVisible = true
+        case "sideBySide":
+            guard let acme, let bluebird else { return }
+            app.layoutMode = .sideBySide
+            app.columnIDs = [acme.id, bluebird.id]
+            app.activate(acme)
+            if let pane = bluebird.server {
+                app.dropHint = DropHint(paneID: pane.id, text: "Drop to copy 2 files here \u{00B7} Acme Corp \u{2192} Bluebird Bakery")
+            }
+        case "compare":
+            acme?.server?.navigate(to: "/home/acme/public_html")
+            try? await Task.sleep(nanoseconds: 800_000_000)
+            app.compareVisible = true
+        case "editing":
+            app.edits.seedDemo()
+            app.showToast("Uploaded wp-config.php to Acme Corp", symbol: "arrow.up.doc")
+        case "recentChanges":
+            guard let acme, let entry = try? await app.journal.entries(scope: acme.scope(.server)).first else { return }
+            app.showToast(entry.summary, symbol: "arrow.uturn.backward.circle", undo: UndoTarget(entry: entry, sessionID: acme.id, side: .server))
+            acme.server?.requestRecentChanges()
         default:
             break
         }

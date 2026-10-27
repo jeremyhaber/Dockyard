@@ -19,12 +19,16 @@ packages:
     path: ../Packages/ConnectionKit
   RcloneKit:
     path: ../Packages/RcloneKit
+  SwiftTerm:
+    url: https://github.com/migueldeicaz/SwiftTerm.git
+    exactVersion: 1.17.0
 targets:
   Dockyard:
     type: application
     platform: macOS
     sources:
       - path: Sources
+      - path: Shared
       - path: Resources
         excludes:
           - Info.plist
@@ -36,6 +40,10 @@ targets:
         product: ConnectionKit
       - package: RcloneKit
         product: RcloneKit
+      - package: SwiftTerm
+        product: SwiftTerm
+      - target: DockyardFinder
+        embed: true
     info:
       path: Resources/Info.plist
       properties:
@@ -72,6 +80,42 @@ targets:
           else
             echo "note: librclone.dylib not found at $SRC, skipping (run scripts/build-librclone.sh to bundle it)"
           fi
+  DockyardFinder:
+    type: app-extension
+    platform: macOS
+    sources:
+      - path: FileProvider
+        excludes:
+          - Info.plist
+          - DockyardFinder.entitlements
+      - path: Shared
+    dependencies:
+      - package: DockyardCore
+        product: DockyardCore
+      - package: ConnectionKit
+        product: ConnectionKit
+      - package: RcloneKit
+        product: RcloneKit
+    info:
+      path: FileProvider/Info.plist
+      properties:
+        CFBundleDisplayName: Dockyard Finder
+        CFBundleShortVersionString: "0.1.0"
+        CFBundleVersion: "1"
+        LSMinimumSystemVersion: "14.0"
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.fileprovider-nonui
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).FileProviderExtension
+          NSExtensionFileProviderDocumentGroup: group.app.dockyard.mac
+          NSExtensionFileProviderSupportsEnumeration: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.dockyard.mac.finder
+        PRODUCT_NAME: DockyardFinder
+        GENERATE_INFOPLIST_FILE: NO
+        CODE_SIGN_ENTITLEMENTS: FileProvider/DockyardFinder.entitlements
+        ENABLE_HARDENED_RUNTIME: NO
+        SKIP_INSTALL: YES
 schemes:
   Dockyard:
     build:

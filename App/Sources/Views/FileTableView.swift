@@ -179,11 +179,11 @@ final class FileTableCoordinator: NSObject, NSTableViewDataSource, NSTableViewDe
             c.sortDescriptorPrototype = NSSortDescriptor(key: key.rawValue, ascending: true)
             return c
         }
-        let name = column(Self.nameID, "Name", key: .name, width: 280, min: 140)
+        let name = column(Self.nameID, "Name", key: .name, width: 260, min: 110)
         name.resizingMask = .autoresizingMask
-        let size = column(Self.sizeID, "Size", key: .size, width: 80, min: 50)
-        let modified = column(Self.modifiedID, "Modified", key: .modified, width: 130, min: 90)
-        let perms = column(Self.permsID, "Perms", key: .permissions, width: 90, min: 60)
+        let size = column(Self.sizeID, "Size", key: .size, width: 70, min: 56)
+        let modified = column(Self.modifiedID, "Modified", key: .modified, width: 110, min: 100)
+        let perms = column(Self.permsID, "Perms", key: .permissions, width: 84, min: 74)
         perms.isHidden = pane.side == .local
         for c in [name, size, modified, perms] { table.addTableColumn(c) }
 
@@ -205,6 +205,10 @@ final class FileTableCoordinator: NSObject, NSTableViewDataSource, NSTableViewDe
         table.onFocus = { [weak self] in
             guard let self else { return }
             self.app.focusedSide = self.pane.side
+            if self.app.layoutMode == .sideBySide || self.app.activeSessionID != self.session.id {
+                self.app.activeSessionID = self.session.id
+            }
+            Task { await self.app.refreshUndoState() }
         }
     }
 
@@ -282,7 +286,7 @@ final class FileTableCoordinator: NSObject, NSTableViewDataSource, NSTableViewDe
         if case .item(let item) = fileRow {
             switch id {
             case Self.sizeID: text = item.isDirectory ? "" : FileDisplay.size(item.size)
-            case Self.modifiedID: text = FileDisplay.modified(item.modified)
+            case Self.modifiedID: text = FileDisplay.modifiedCompact(item.modified)
             case Self.permsID: text = FileDisplay.permissions(item.permissions)
             default: break
             }
@@ -337,15 +341,7 @@ final class FileTableCoordinator: NSObject, NSTableViewDataSource, NSTableViewDe
             NSWorkspace.shared.open(URL(fileURLWithPath: item.path))
             return
         }
-        let session = self.session
-        Task {
-            do {
-                let url = try await session.fetchForOpening(item)
-                NSWorkspace.shared.open(url)
-            } catch {
-                session.operationError = "Open \(item.name): \(error.userMessage)"
-            }
-        }
+        app.edits.edit(item, in: session)
     }
 
     private func commandClick(_ row: Int) -> Bool {
@@ -456,10 +452,10 @@ final class FileTableCoordinator: NSObject, NSTableViewDataSource, NSTableViewDe
         let items = pane.selectedItems
         if pane.side == .local {
             guard let server = session.server else { return }
-            session.queueTransfer(items, from: .local, to: .server, directory: server.currentPath, move: false, queue: app.queue)
+            app.transfer(items, from: session, .local, to: session, .server, directory: server.currentPath, move: false)
         } else {
             guard let local = session.local else { return }
-            session.queueTransfer(items, from: .server, to: .local, directory: local.currentPath, move: false, queue: app.queue)
+            app.transfer(items, from: session, .server, to: session, .local, directory: local.currentPath, move: false)
         }
     }
 
@@ -479,7 +475,7 @@ final class FileTableCoordinator: NSObject, NSTableViewDataSource, NSTableViewDe
         let what = items.count == 1 ? "\"\(items[0].name)\"" : "\(items.count) items"
         guard Dialogs.confirm(
             title: "Delete \(what)?",
-            message: pane.side == .local ? "The items are deleted immediately." : "The items are deleted from the server and cannot be recovered.",
+            message: pane.side == .local ? "The items are moved to the Trash." : "The items are deleted from the server and cannot be recovered.",
             confirm: "Delete") else { return }
         let session = self.session, side = pane.side
         Task { await session.delete(items, in: side) }

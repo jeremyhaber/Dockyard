@@ -101,6 +101,13 @@ struct SidebarRow: View {
                 .font(.system(size: 12))
                 .lineLimit(1)
             Spacer(minLength: 2)
+            if connection.mountInFinder {
+                Image(systemName: "externaldrive.fill")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Palette.textSecondary)
+                    .help("Mounted in Finder")
+                    .accessibilityLabel("Mounted in Finder")
+            }
             if connection.isNew { Badge(text: "NEW", style: .new) }
             if connection.isProd { Badge(text: "PROD", style: .prod) }
         }
@@ -116,6 +123,11 @@ struct SidebarRow: View {
             Button("Open in New Tab") { app.open(connection, newTab: true) }
             Divider()
             Button(connection.favorite ? "Remove from Favorites" : "Add to Favorites") { app.toggleFavorite(connection) }
+            Button(connection.mountInFinder ? "Unmount from Finder" : "Mount in Finder") {
+                app.setMounted(connection, !connection.mountInFinder)
+            }
+            .disabled(!MountPolicy.canMount(connection))
+            Button("Open Side by Side") { app.openSideBySide(connection) }
             Button("Edit\u{2026}") { app.editConnection(connection, origin: .main) }
         }
         .accessibilityElement(children: .combine)

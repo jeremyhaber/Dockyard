@@ -70,11 +70,8 @@ struct SiteEditorSheet: View {
             .pickerStyle(.segmented)
             if draft.protocolChoice != .cloud {
                 TextField("Host", text: $draft.host)
-                HStack {
-                    TextField("Port", text: $draft.port, prompt: Text(String(draft.protocolChoice.connectionProtocol.defaultPort)))
-                        .frame(maxWidth: 140)
-                    TextField("User", text: $draft.username)
-                }
+                TextField("Port", text: $draft.port, prompt: Text(String(draft.protocolChoice.connectionProtocol.defaultPort)))
+                TextField("User", text: $draft.username)
             }
         }
     }
@@ -152,7 +149,7 @@ struct SiteEditorSheet: View {
             Toggle("Mount in Finder", isOn: $draft.mountInFinder)
             Toggle("Mount when Dockyard opens", isOn: $draft.mountOnLaunch)
             Toggle("Read-only mount", isOn: $draft.mountReadOnly)
-            Text("Saved with the connection. Mounting arrives with the Finder extension.")
+            Text("Saving mounts the connection under Locations in Finder. PROD sites mount read-only by default, and mounts never use su or sudo.")
                 .font(.caption).foregroundStyle(Palette.textSecondary)
         }
     }

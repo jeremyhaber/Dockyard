@@ -15,6 +15,7 @@ enum DragState {
     static func clear() {
         origin = nil
         items = []
+        AppModel.shared.dropHint = nil
     }
 }
 
@@ -25,11 +26,21 @@ enum DropHandler {
         var items: [RemoteItem]
         var originSide: PaneSide
         var sameFileSystem: Bool
+        /// The session the drag started in, when that is not the target's session (server to server).
+        var originSession: ConnectionSession?
     }
 
     static func resolve(_ info: NSDraggingInfo, pane: PaneModel, session: ConnectionSession) -> Resolved? {
-        if let origin = DragState.origin, origin.session == session.id, !DragState.items.isEmpty {
-            return Resolved(items: DragState.items, originSide: origin.side, sameFileSystem: origin.side == pane.side)
+        if let origin = DragState.origin, !DragState.items.isEmpty {
+            if origin.session == session.id {
+                return Resolved(items: DragState.items, originSide: origin.side, sameFileSystem: origin.side == pane.side)
+            }
+            // Another connection's server column: relayed through this Mac.
+            if origin.side == .server, pane.side == .server,
+               let other = AppModel.shared.sessions.first(where: { $0.id == origin.session }) {
+                return Resolved(items: DragState.items, originSide: .server, sameFileSystem: false, originSession: other)
+            }
+            return nil
         }
         // Files dragged from Finder.
         guard let urls = info.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL],
@@ -43,16 +54,40 @@ enum DropHandler {
     static func operation(
         _ info: NSDraggingInfo, pane: PaneModel, session: ConnectionSession, directory: String
     ) -> NSDragOperation {
-        guard let resolved = resolve(info, pane: pane, session: session) else { return [] }
+        guard let resolved = resolve(info, pane: pane, session: session) else {
+            AppModel.shared.dropHint = nil
+            return []
+        }
         let option = NSEvent.modifierFlags.contains(.option)
         let plan = DropPlanner.plan(
             items: resolved.items, destinationDirectory: directory,
             sameFileSystem: resolved.sameFileSystem, optionKey: option)
+        let isRelay = resolved.originSession != nil
         switch plan {
-        case .move: return .move
-        case .copy: return .copy
-        case .reject: return []
+        case .move:
+            AppModel.shared.dropHint = hint(resolved, pane: pane, session: session, verb: "move")
+            return .move
+        case .copy:
+            AppModel.shared.dropHint = hint(resolved, pane: pane, session: session, verb: isRelay && option ? "move" : "copy")
+            return isRelay && option ? .move : .copy
+        case .reject:
+            AppModel.shared.dropHint = nil
+            return []
         }
+    }
+
+    /// "Drop to copy 2 files here \u{00B7} Prod \u{2192} Staging".
+    static func hint(_ resolved: Resolved, pane: PaneModel, session: ConnectionSession, verb: String) -> DropHint {
+        let source = resolved.originSession ?? session
+        let from = resolved.originSide == .local ? "This Mac" : source.connection.name
+        let to = pane.side == .local ? "This Mac" : session.connection.name
+        let files = resolved.items.filter { !$0.isDirectory }.count
+        let folders = resolved.items.count - files
+        var what: [String] = []
+        if files > 0 { what.append("\(files) file\(files == 1 ? "" : "s")") }
+        if folders > 0 { what.append("\(folders) folder\(folders == 1 ? "" : "s")") }
+        let route = resolved.sameFileSystem ? "" : " \u{00B7} \(from) \u{2192} \(to)"
+        return DropHint(paneID: pane.id, text: "Drop to \(verb) \(what.joined(separator: " and ")) here\(route)")
     }
 
     static func perform(
@@ -70,9 +105,10 @@ enum DropHandler {
             let items = resolved.items
             Task { await session.move(items, to: directory, in: pane.side) }
         case .copy:
-            session.queueTransfer(
-                resolved.items, from: resolved.originSide, to: pane.side, directory: directory,
-                move: false, queue: app.queue)
+            let source = resolved.originSession ?? session
+            app.transfer(
+                resolved.items, from: source, resolved.originSide, to: session, pane.side, directory: directory,
+                move: resolved.originSession != nil && option)
         }
         DragState.clear()
         return true

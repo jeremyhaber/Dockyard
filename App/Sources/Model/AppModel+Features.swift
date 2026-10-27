@@ -125,6 +125,28 @@ extension AppModel {
     }
 }
 
+extension AppModel {
+    /// Shows what the Finder extension did (it writes to a file in the App Group container) in each connection's Log.
+    func startFinderLogRelay() {
+        guard AppGroup.isSigned, !DemoMode.isEnabled else { return }
+        Task {
+            var offsets: [UUID: UInt64] = [:]
+            while true {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                for session in sessions {
+                    let id = session.connection.id
+                    let from = offsets[id] ?? FinderLogFile.currentSize(connection: id)
+                    let result = FinderLogFile.read(connection: id, from: from)
+                    offsets[id] = result.next
+                    for line in result.lines {
+                        session.log.append(LogLine.Kind(rawValue: line.kind) ?? .status, line.message)
+                    }
+                }
+            }
+        }
+    }
+}
+
 // MARK: - Toasts
 
 extension AppModel {
@@ -132,7 +154,8 @@ extension AppModel {
         let toast = Toast(text: text, symbol: symbol, isError: isError, undo: undo)
         toasts.append(toast)
         Task {
-            try? await Task.sleep(nanoseconds: undo == nil ? 4_000_000_000 : 9_000_000_000)
+            let seconds: UInt64 = DemoMode.isEnabled ? 120 : (undo == nil ? 4 : 9)
+            try? await Task.sleep(nanoseconds: seconds * 1_000_000_000)
             toasts.removeAll { $0.id == toast.id }
         }
     }

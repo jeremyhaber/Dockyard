@@ -44,7 +44,7 @@ struct ConnectionManagerView: View {
                         .font(.caption)
                         .foregroundStyle(Palette.textSecondary)
                     Spacer()
-                    Text("\u{21A9} connect   \u{2318}\u{21A9} new tab   \u{2325}\u{21A9} side by side (coming soon)")
+                    Text("\u{21A9} connect   \u{2318}\u{21A9} new tab   \u{2325}\u{21A9} side by side")
                         .font(.caption)
                         .foregroundStyle(Palette.textSecondary)
                 }
@@ -55,6 +55,7 @@ struct ConnectionManagerView: View {
         .frame(minWidth: 900, minHeight: 520)
         .background(Palette.ground)
         .navigationTitle("Connections")
+        .background(WindowAccessor { window in DemoWindows.register("manager", window) })
         .task(id: model.key(app: app)) { await model.reload(app: app) }
         .sheet(item: editorBinding) { request in SiteEditorSheet(request: request) }
         .sheet(isPresented: $showWHM) { WHMSheet(model: model) }
@@ -86,7 +87,12 @@ struct ConnectionManagerView: View {
                 }
             },
             delete: { c in Task { await app.delete(c) } },
-            toggleFavorite: { app.toggleFavorite($0) })
+            toggleFavorite: { app.toggleFavorite($0) },
+            sideBySide: { c in
+                app.openSideBySide(c)
+                openWindow(id: "main")
+            },
+            setMounted: { c, mounted in app.setMounted(c, mounted) })
     }
 
     // MARK: Left list

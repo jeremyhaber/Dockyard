@@ -54,6 +54,8 @@ struct TransferBar: View {
             .popover(isPresented: $showQueue, arrowEdge: .top) { QueuePopover() }
             .accessibilityLabel("Transfer queue")
 
+            EditingIndicator()
+
             Spacer()
 
             logButton
@@ -226,6 +228,54 @@ struct JobRow: View {
         case .failed: .red
         case .running: Color.accentColor
         default: Palette.textSecondary
+        }
+    }
+}
+
+/// "Editing 2 files": server files opened in an editor and uploaded on every save, with a Stop button each.
+struct EditingIndicator: View {
+    @Environment(AppModel.self) private var app
+    @State private var showList = false
+
+    var body: some View {
+        let entries = app.edits.entries
+        if !entries.isEmpty {
+            Button {
+                showList.toggle()
+            } label: {
+                Label("Editing \(entries.count) file\(entries.count == 1 ? "" : "s")", systemImage: "pencil.and.outline")
+            }
+            .controlSize(.small)
+            .help("Files you are editing; saves upload automatically")
+            .popover(isPresented: $showList, arrowEdge: .top) {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("Saved changes upload automatically")
+                        .font(.caption)
+                        .foregroundStyle(Palette.textSecondary)
+                        .padding(10)
+                    Divider()
+                    ForEach(app.edits.entries) { entry in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(entry.fileName).font(.system(size: 12, weight: .medium))
+                                Text("\(entry.connectionName) \u{00B7} \(entry.remotePath)")
+                                    .font(.monoSmall)
+                                    .foregroundStyle(Palette.textSecondary)
+                                    .lineLimit(1)
+                                    .truncationMode(.head)
+                            }
+                            Spacer(minLength: 12)
+                            Button("Stop") { app.edits.stop(entry.id) }
+                                .controlSize(.small)
+                                .accessibilityLabel("Stop editing \(entry.fileName)")
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        Divider()
+                    }
+                }
+                .frame(width: 420)
+            }
         }
     }
 }

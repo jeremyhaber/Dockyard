@@ -4,5 +4,13 @@
 <dict>
 	<key>com.apple.security.app-sandbox</key>
 	<false/>
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>group.app.dockyard.mac</string>
+	</array>
+	<key>keychain-access-groups</key>
+	<array>
+		<string>$(AppIdentifierPrefix)app.dockyard.mac.shared</string>
+	</array>
 </dict>
 </plist>

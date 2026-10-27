@@ -11,7 +11,7 @@ struct DockyardApp: App {
             MainWindow()
                 .environment(model)
         }
-        .defaultSize(width: 1320, height: 820)
+        .defaultSize(DockyardWindowDefaults.initialSize)
         .commands { AppCommands(model: model) }
 
         Window("Connections", id: "manager") {
@@ -19,11 +19,22 @@ struct DockyardApp: App {
                 .environment(model)
         }
         .defaultSize(width: 1040, height: 660)
+
+        Settings {
+            SettingsView()
+                .environment(model)
+        }
     }
 }
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        // The system appearance cannot be set from the command line in CI, so demo mode forces it.
+        guard DemoMode.isEnabled, let name = DemoMode.appearance else { return }
+        NSApp.appearance = NSAppearance(named: name.lowercased() == "dark" ? .darkAqua : .aqua)
+    }
+
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
     /// Session state is written before the app exits (the async flush needs a moment, hence `terminateLater`).
@@ -70,6 +81,13 @@ struct AppCommands: Commands {
                 .disabled(model.activeSession == nil)
         }
 
+        CommandGroup(replacing: .undoRedo) {
+            Button(model.undoLabel ?? "Undo") { undo(redo: false) }
+                .keyboardShortcut("z")
+            Button(model.redoLabel ?? "Redo") { undo(redo: true) }
+                .keyboardShortcut("z", modifiers: [.command, .shift])
+        }
+
         CommandGroup(replacing: .saveItem) {
             Button("Close Window") { NSApp.keyWindow?.performClose(nil) }
                 .keyboardShortcut("w", modifiers: [.command, .option])
@@ -93,6 +111,14 @@ struct AppCommands: Commands {
             }
             .keyboardShortcut(".", modifiers: [.command, .shift])
             .disabled(pane == nil)
+            Divider()
+            Button(model.layoutMode == .sideBySide ? "Show Local + Server" : "Show Servers Side by Side") {
+                model.setLayout(model.layoutMode == .sideBySide ? .localServer : .sideBySide)
+            }
+            .keyboardShortcut("s", modifiers: [.command, .option])
+            Button("Compare and Sync\u{2026}") { model.compareVisible = true }
+                .keyboardShortcut("y", modifiers: [.command, .shift])
+                .disabled(model.activeSession?.status.isConnected != true)
             Divider()
             Button(model.drawerVisible ? "Hide Log" : "Show Log") { model.toggleDrawer(tab: .log) }
                 .keyboardShortcut("l", modifiers: [.command, .shift])
@@ -139,6 +165,15 @@ struct AppCommands: Commands {
             Button("Previous Connection Tab") { cycle(-1) }
                 .keyboardShortcut("[", modifiers: [.command, .shift])
             Divider()
+        }
+    }
+
+    /// Text fields keep their own undo; anywhere else ⌘Z reverses the last file change on the focused pane.
+    private func undo(redo: Bool) {
+        if let text = NSApp.keyWindow?.firstResponder as? NSTextView {
+            if redo { text.undoManager?.redo() } else { text.undoManager?.undo() }
+        } else {
+            model.undoLast(redo: redo)
         }
     }
 

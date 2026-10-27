@@ -144,6 +144,7 @@ final class AppModel {
         } else {
             startWHMScheduler()
             migrateSecretsIfNeeded()
+            startFinderLogRelay()
         }
     }
 
