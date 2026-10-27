@@ -507,4 +507,8 @@ final class FileTableCoordinator: NSObject, NSTableViewDataSource, NSTableViewDe
         Task { await session.chmod(items, mode: mode, in: side) }
     }
 
-    @objc private func
+    @objc private func menuRefresh() {
+        pane.invalidate()
+        pane.reload()
+    }
+}
