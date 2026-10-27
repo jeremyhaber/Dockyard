@@ -34,11 +34,8 @@ struct Toast: Identifiable, Equatable {
     var symbol = "checkmark.circle"
     var isError = false
     var undo: UndoTarget?
-<<<<<<< HEAD
     var action: ToastAction?
-=======
     var link: ToastLink?
->>>>>>> origin/dev
 }
 
 /// Where a toast's "View" button leads.
@@ -174,21 +171,14 @@ extension AppModel {
 // MARK: - Toasts
 
 extension AppModel {
-<<<<<<< HEAD
     func showToast(
-        _ text: String, symbol: String = "checkmark.circle", isError: Bool = false, undo: UndoTarget? = nil, action: ToastAction? = nil
+        _ text: String, symbol: String = "checkmark.circle", isError: Bool = false, undo: UndoTarget? = nil,
+        link: ToastLink? = nil, action: ToastAction? = nil
     ) {
-        let toast = Toast(text: text, symbol: symbol, isError: isError, undo: undo, action: action)
+        let toast = Toast(text: text, symbol: symbol, isError: isError, undo: undo, action: action, link: link)
         toasts.append(toast)
         Task {
-            let seconds: UInt64 = DemoMode.isEnabled ? 120 : (undo == nil && action == nil ? 4 : 9)
-=======
-    func showToast(_ text: String, symbol: String = "checkmark.circle", isError: Bool = false, undo: UndoTarget? = nil, link: ToastLink? = nil) {
-        let toast = Toast(text: text, symbol: symbol, isError: isError, undo: undo, link: link)
-        toasts.append(toast)
-        Task {
-            let seconds: UInt64 = DemoMode.isEnabled ? 120 : (undo == nil && link == nil ? 4 : 9)
->>>>>>> origin/dev
+            let seconds: UInt64 = DemoMode.isEnabled ? 120 : (undo == nil && link == nil && action == nil ? 4 : 9)
             try? await Task.sleep(nanoseconds: seconds * 1_000_000_000)
             toasts.removeAll { $0.id == toast.id }
         }
