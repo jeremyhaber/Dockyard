@@ -84,6 +84,9 @@ struct LocalArchiveHost: ArchiveHost {
         let process = Process()
         process.executableURL = executable
         process.arguments = Array(command.argv.dropFirst())
+        if !command.environment.isEmpty {
+            process.environment = ProcessInfo.processInfo.environment.merging(command.environment) { _, new in new }
+        }
         if let directory = command.directory { process.currentDirectoryURL = URL(fileURLWithPath: directory) }
         let pipe = Pipe()
         process.standardOutput = pipe

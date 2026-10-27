@@ -11,10 +11,11 @@ let nastyNames = [
 /// Relative path -> contents for every file below `root`.
 func tree(_ root: URL) -> [String: String] {
     var out: [String: String] = [:]
-    guard let walker = FileManager.default.enumerator(at: root, includingPropertiesForKeys: [.isRegularFileKey]) else { return out }
-    for case let url as URL in walker {
+    // Relative paths come straight from the enumerator, so /var vs /private/var symlinks on macOS don't matter.
+    guard let walker = FileManager.default.enumerator(atPath: root.path) else { return out }
+    for case let relative as String in walker {
+        let url = root.appendingPathComponent(relative)
         guard (try? url.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true else { continue }
-        let relative = String(url.path.dropFirst(root.path.count + 1))
         out[relative] = try? String(contentsOf: url, encoding: .utf8)
     }
     return out
@@ -98,6 +99,8 @@ private struct StubHost: ArchiveHost {
 
 @Suite struct LocalArchiveTests {
     private func roundTrip(_ format: ArchiveFormat, tools: [String]) async throws {
+        // zip cannot store line breaks in names (compress refuses them), so that name is only used for tar.
+        let skipped: Set<String> = format == .zip ? ["new\nline.txt"] : []
         let available = LocalArchiveHost()
         let present = try await available.availableTools(tools)
         guard Set(tools).isSubset(of: present) || (format == .zip && present.contains("bsdtar")) else { return }  // tool not installed here
@@ -105,6 +108,7 @@ private struct StubHost: ArchiveHost {
         defer { try? FileManager.default.removeItem(at: work) }
         let source = work.appendingPathComponent("src dir")
         try makeNastyTree(source)
+        for name in skipped { try FileManager.default.removeItem(at: source.appendingPathComponent(name)) }
         let names = try FileManager.default.contentsOfDirectory(atPath: source.path).sorted()
         let service = ArchiveService(conflictPolicy: .overwrite)
         let archive = work.appendingPathComponent("out put").appendingPathComponent("my archive.\(format.fileExtension)").path
