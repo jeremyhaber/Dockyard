@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Protocol</key>
+	<string>sftp</string>
+	<key>Provider</key>
+	<string>iterate GmbH</string>
+	<key>UUID</key>
+	<string>3F0A91C2-6D55-4C3B-9B1E-2A7B8D4E5F10</string>
+	<key>Hostname</key>
+	<string>web01.acme.example</string>
+	<key>Port</key>
+	<string>22</string>
+	<key>Username</key>
+	<string>deploy</string>
+	<key>Nickname</key>
+	<string>Acme web01</string>
+	<key>Path</key>
+	<string>/var/www/acme</string>
+	<key>Comment</key>
+	<string>Primary web node</string>
+	<key>Labels</key>
+	<array>
+		<string>production</string>
+		<string>acme</string>
+	</array>
+	<key>Private Key File</key>
+	<string>~/.ssh/id_ed25519</string>
+	<key>Access Date</key>
+	<date>2025-09-14T08:21:55Z</date>
+	<key>Timestamp</key>
+	<date>2024-03-02T10:00:12Z</date>
+</dict>
+</plist>

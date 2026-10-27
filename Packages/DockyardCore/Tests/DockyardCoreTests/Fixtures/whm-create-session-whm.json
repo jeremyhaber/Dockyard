@@ -1,0 +1,15 @@
+{
+   "data" : {
+      "cp_security_token" : "/cpsess2893410567",
+      "expires" : 1761576060,
+      "service" : "whostmgrd",
+      "session" : "root:Qm81TzR0cVw5uYh2:c71e0d4f9b3a5826",
+      "url" : "https://whm.example.com:2087/cpsess2893410567/login/?session=root%3aQm81TzR0cVw5uYh2%2cc71e0d4f9b3a5826"
+   },
+   "metadata" : {
+      "command" : "create_user_session",
+      "reason" : "OK",
+      "result" : 1,
+      "version" : 1
+   }
+}

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Protocol</key>
+	<string>sftp</string>
+	<key>UUID</key>
+	<string>A1B2C3D4-0001-4000-8000-000000000005</string>
+	<key>Nickname</key>
+	<string>Half-finished entry</string>
+	<key>Username</key>
+	<string>nobody</string>
+</dict>
+</plist>

@@ -249,6 +249,9 @@ final class ManagerTableCoordinator: NSObject, NSTableViewDataSource, NSTableVie
         case .manual: "Added by hand"
         case .quickConnect: "Quick connect"
         case .filezillaImport: "FileZilla import"
+        case .transmitImport: "Transmit import"
+        case .cyberduckImport: "Cyberduck import"
+        case .sshConfigImport: "SSH config"
         case .whm(let id): "WHM: \(parent.sourceLabels[id] ?? "server")"
         }
     }

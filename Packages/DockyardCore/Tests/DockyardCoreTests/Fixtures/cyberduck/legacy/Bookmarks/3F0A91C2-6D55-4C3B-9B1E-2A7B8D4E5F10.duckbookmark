@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Protocol</key>
+	<string>sftp</string>
+	<key>UUID</key>
+	<string>3F0A91C2-6D55-4C3B-9B1E-2A7B8D4E5F10</string>
+	<key>Hostname</key>
+	<string>web01.acme.example</string>
+	<key>Port</key>
+	<string>22</string>
+	<key>Username</key>
+	<string>deploy</string>
+	<key>Nickname</key>
+	<string>Acme web01</string>
+</dict>
+</plist>

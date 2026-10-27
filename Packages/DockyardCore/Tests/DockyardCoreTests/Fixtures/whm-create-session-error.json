@@ -1,0 +1,8 @@
+{
+   "metadata" : {
+      "command" : "create_user_session",
+      "reason" : "The system could not find the user “nosuchuser”.",
+      "result" : 0,
+      "version" : 1
+   }
+}

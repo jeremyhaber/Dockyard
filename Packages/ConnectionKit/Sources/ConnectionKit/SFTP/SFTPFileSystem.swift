@@ -1,12 +1,14 @@
 import Foundation
 
 /// SFTP over SSH using libssh2 for the transport and `SFTPClient` for the protocol.
-public actor SFTPFileSystem: RemoteFileSystem {
+public actor SFTPFileSystem: RemoteFileSystem, RemoteCommandRunner {
     public struct Options: Sendable {
         /// Start `sftp-server` as root through the configured `su`/`sudo` elevation. Falls back to the
         /// normal user (with a warning in the log) when elevation fails.
         public var browseAsRoot = false
         public var session = SSHSessionOptions()
+        /// Hosts to tunnel through, outermost first. Each hop is an SSH connection of its own.
+        public var jumpHosts: [SSHJumpHop] = []
 
         public init(browseAsRoot: Bool = false) { self.browseAsRoot = browseAsRoot }
     }
@@ -42,12 +44,9 @@ public actor SFTPFileSystem: RemoteFileSystem {
         await disconnectQuietly()
         hub.emit(.status, "Connecting to \(config.host):\(config.port)...")
         do {
-            let hub = self.hub
-            let session = try await SSHSession.connect(
-                host: config.host, port: config.port, options: options.session, validator: hostKeyValidator
-            ) { hub.emit($0, $1) }
+            let session = try await connectSession()
             ssh = session
-            try await session.authenticate(username: config.username, steps: try await authSteps())
+            try await session.authenticate(username: config.username, steps: try await SSHAuth.steps(for: config, secrets: secrets))
             try await openSFTP(on: session)
             hub.emit(.status, "SFTP subsystem ready")
         } catch {
@@ -70,28 +69,28 @@ public actor SFTPFileSystem: RemoteFileSystem {
         isBrowsingAsRoot = false
     }
 
-    private func authSteps() async throws -> [SSHAuthStep] {
-        let methods = config.authMethods
-        var steps: [SSHAuthStep] = []
-        if methods.contains(.agent) { steps.append(.agent) }
-        if methods.contains(.key) {
-            guard let keyPath = config.keyPath else { throw RemoteError.invalidConfiguration("Key authentication needs a key path") }
-            let expanded = (keyPath as NSString).expandingTildeInPath
-            guard let key = try? String(contentsOfFile: expanded, encoding: .utf8) else {
-                throw RemoteError.invalidConfiguration("Cannot read key file at \(keyPath)")
+    /// Connects the whole jump chain and returns the session for the final host (not yet authenticated).
+    private func connectSession() async throws -> SSHSession {
+        let hub = self.hub
+        var upstream: SSHSession?
+        do {
+            for hop in options.jumpHosts {
+                hub.emit(.status, "Connecting to jump host \(hop.config.host):\(hop.config.port)...")
+                let session = try await SSHSession.connect(
+                    host: hop.config.host, port: hop.config.port, via: upstream, options: options.session,
+                    validator: hop.hostKeyValidator ?? hostKeyValidator
+                ) { hub.emit($0, "[\(hop.config.host)] \($1)") }
+                upstream = session
+                try await session.authenticate(username: hop.config.username, steps: try await SSHAuth.steps(for: hop.config, secrets: hop.secrets))
             }
-            steps.append(.publicKey(privateKey: key, passphrase: try await secrets.secret(for: config.id, purpose: .keyPassphrase)))
+            if upstream != nil { hub.emit(.status, "Connecting to \(config.host):\(config.port) through the jump host...") }
+            return try await SSHSession.connect(
+                host: config.host, port: config.port, via: upstream, options: options.session, validator: hostKeyValidator
+            ) { hub.emit($0, $1) }
+        } catch {
+            await upstream?.close()
+            throw error
         }
-        if methods.contains(.password) || methods.contains(.keyboardInteractive) {
-            if let password = try await secrets.secret(for: config.id, purpose: .password) {
-                if methods.contains(.password) { steps.append(.password(password)) }
-                steps.append(.keyboardInteractive { _, _ in password })
-            } else if steps.isEmpty {
-                throw RemoteError.authenticationFailed("No password stored for this connection")
-            }
-        }
-        guard !steps.isEmpty else { throw RemoteError.invalidConfiguration("No authentication method selected") }
-        return steps
     }
 
     private func openSFTP(on session: SSHSession) async throws {
@@ -133,6 +132,12 @@ public actor SFTPFileSystem: RemoteFileSystem {
         guard let ssh else { throw RemoteError.notConnected }
         hub.emit(.command, command)
         return try await ssh.exec(command)
+    }
+
+    public func execStream(_ command: String) async throws -> AsyncThrowingStream<SSHExecEvent, Error> {
+        guard let ssh else { throw RemoteError.notConnected }
+        hub.emit(.command, command)
+        return try await ssh.execStream(command)
     }
 
     // MARK: Listing
