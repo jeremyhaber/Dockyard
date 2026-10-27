@@ -1,0 +1,116 @@
+import Foundation
+import GRDB
+
+/// Owns the SQLite database (a file in the app group container, or in memory for tests).
+/// Secrets are never written here; `Connection` has no password fields.
+public final class DockyardDatabase: Sendable {
+    public let writer: any DatabaseWriter
+
+    public init(path: String) throws {
+        var config = Configuration()
+        config.foreignKeysEnabled = true
+        let pool = try DatabasePool(path: path, configuration: config)
+        writer = pool
+        try Self.migrator.migrate(pool)
+    }
+
+    /// In-memory database for tests and previews.
+    public init() throws {
+        var config = Configuration()
+        config.foreignKeysEnabled = true
+        let queue = try DatabaseQueue(configuration: config)
+        writer = queue
+        try Self.migrator.migrate(queue)
+    }
+
+    /// Read-only access for the File Provider extension (it reads the app's database).
+    public static func openReadOnly(path: String) throws -> DockyardDatabase {
+        try DockyardDatabase(readOnlyPath: path)
+    }
+
+    private init(readOnlyPath path: String) throws {
+        var config = Configuration()
+        config.readonly = true
+        writer = try DatabaseQueue(path: path, configuration: config)
+    }
+
+    static var migrator: DatabaseMigrator {
+        var migrator = DatabaseMigrator()
+        migrator.registerMigration("v1") { db in
+            try db.create(table: "clientFolder") { t in
+                t.primaryKey("id", .text)
+                t.column("name", .text).notNull()
+            }
+            try db.create(table: "whmSource") { t in
+                t.primaryKey("id", .text)
+                t.column("label", .text).notNull()
+                t.column("host", .text).notNull()
+                t.column("apiPort", .integer).notNull().defaults(to: 2087)
+                t.column("apiUser", .text).notNull().defaults(to: "root")
+                t.column("apiTokenKeychainRef", .text).notNull()
+                t.column("lastSyncAt", .datetime)
+                t.column("lastSyncError", .text)
+            }
+            try db.create(table: "connection") { t in
+                t.primaryKey("id", .text)
+                t.column("name", .text).notNull()
+                t.column("clientFolderId", .text).references("clientFolder", onDelete: .setNull)
+                t.column("protocol", .text).notNull()
+                t.column("host", .text).notNull()
+                t.column("port", .integer).notNull()
+                t.column("username", .text).notNull()
+                t.column("authMethods", .integer).notNull()
+                t.column("keyPath", .text)
+                t.column("elevation", .text).notNull().defaults(to: "none")
+                t.column("elevateFileBrowsing", .boolean).notNull().defaults(to: false)
+                t.column("askBeforeElevatingOnProd", .boolean).notNull().defaults(to: true)
+                t.column("isProd", .boolean).notNull().defaults(to: false)
+                t.column("favorite", .boolean).notNull().defaults(to: false)
+                t.column("tags", .text).notNull().defaults(to: "[]")
+                t.column("notes", .text).notNull().defaults(to: "")
+                t.column("source", .text).notNull().defaults(to: "manual")
+                t.column("restoreSession", .boolean).notNull().defaults(to: true)
+                t.column("mountInFinder", .boolean).notNull().defaults(to: false)
+                t.column("mountOnLaunch", .boolean).notNull().defaults(to: false)
+                t.column("mountReadOnly", .boolean).notNull().defaults(to: false)
+                t.column("lastConnectedAt", .datetime)
+                t.column("createdAt", .datetime).notNull()
+                t.column("removedFromSource", .boolean).notNull().defaults(to: false)
+                t.column("isNew", .boolean).notNull().defaults(to: false)
+                t.column("userEditedFields", .text).notNull().defaults(to: "[]")
+                t.column("initialRemotePath", .text)
+            }
+            try db.create(index: "connection_on_host", on: "connection", columns: ["host"])
+            try db.create(index: "connection_on_source", on: "connection", columns: ["source"])
+            try db.create(index: "connection_on_lastConnectedAt", on: "connection", columns: ["lastConnectedAt"])
+            try db.create(index: "connection_on_createdAt", on: "connection", columns: ["createdAt"])
+            try db.create(index: "connection_on_endpoint", on: "connection", columns: ["protocol", "host", "port", "username"])
+
+            try db.create(table: "sessionState") { t in
+                t.primaryKey("connectionId", .text).references("connection", onDelete: .cascade)
+                t.column("localTabs", .text).notNull()
+                t.column("remoteTabs", .text).notNull()
+                t.column("activeLocalTab", .integer).notNull()
+                t.column("activeRemoteTab", .integer).notNull()
+                t.column("localTreeExpanded", .text).notNull()
+                t.column("remoteTreeExpanded", .text).notNull()
+                t.column("savedAt", .datetime).notNull()
+            }
+            try db.create(table: "folderHistory") { t in
+                t.autoIncrementedPrimaryKey("id")
+                t.column("connectionId", .text).notNull().references("connection", onDelete: .cascade)
+                t.column("path", .text).notNull()
+                t.column("visitedAt", .datetime).notNull()
+            }
+            try db.create(index: "folderHistory_on_connection", on: "folderHistory", columns: ["connectionId", "id"])
+            try db.create(table: "snippet") { t in
+                t.primaryKey("id", .text)
+                t.column("name", .text).notNull()
+                t.column("command", .text).notNull()
+                t.column("connectionId", .text).references("connection", onDelete: .cascade)
+                t.column("sortOrder", .integer).notNull().defaults(to: 0)
+            }
+        }
+        return migrator
+    }
+}
