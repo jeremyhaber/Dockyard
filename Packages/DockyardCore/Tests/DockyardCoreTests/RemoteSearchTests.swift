@@ -171,10 +171,18 @@ private func printfOutput(pid: Int = 4242, _ records: [(type: String, size: Int,
         #expect(result.summary?.error?.contains("/site/wp-content") == true)
     }
 
+    final class SlowListFileSystem: ShellFakeFileSystem, @unchecked Sendable {
+        override func list(_ path: String) async throws -> [RemoteItem] {
+            try await Task.sleep(for: .milliseconds(5))
+            return try await super.list(path)
+        }
+    }
+
     @Test func cancellingStopsTheWalk() async throws {
         let fs = FakeFileSystem()
+        let slow = SlowListFileSystem(base: fs)
         for i in 0..<300 { fs.put("/big/d\(i)/f.txt", "x") }
-        let task = Task { await collect(RemoteSearch.search(SearchQuery(mode: .name, text: "nomatch", root: "/big"), on: fs)) }
+        let task = Task { await collect(RemoteSearch.search(SearchQuery(mode: .name, text: "nomatch", root: "/big"), on: slow)) }
         await waitUntil { fs.calls.count > 3 }
         task.cancel()
         _ = await task.value
@@ -279,9 +287,9 @@ private func printfOutput(pid: Int = 4242, _ records: [(type: String, size: Int,
             if try await running() >= 1 { started = true; break }
             try await Task.sleep(for: .milliseconds(100))
         }
-        #expect(started)
         task.cancel()
-        _ = await task.value
+        let result = await task.value
+        #expect(started, "search ended with \(String(describing: result.summary))")
         var gone = false
         for _ in 0..<50 {
             if try await running() == 0 { gone = true; break }

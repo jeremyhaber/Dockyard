@@ -173,7 +173,7 @@ private func sampleContents(includeSecrets: Bool = true) -> ExportContents {
         for source in contents.whmSources { try await a.whm.save(source) }
         try await a.connections.save(contents.connections.filter { $0.jumpHost == nil })
         try await a.connections.save(contents.connections.filter { $0.jumpHost != nil })
-        for (id, byPurpose) in contents.secrets { for (purpose, value) in byPurpose { try await a.secrets.setSecret(value, for: id, purpose: purpose) } }
+        for (id, byPurpose) in contents.secrets { for (purpose, value) in byPurpose { await a.secrets.setSecret(value, for: id, purpose: purpose) } }
 
         let collected = try await a.collector.collect(includeSecrets: true, settings: contents.settings)
         #expect(collected.connections.count == 3 && collected.secrets.count == 2)
@@ -210,7 +210,7 @@ private func sampleContents(includeSecrets: Bool = true) -> ExportContents {
         var mine = Connection(name: "My own name", protocol: .sftp, host: "ACME.example.com", port: 22, username: "deploy")
         mine.notes = "local notes"
         try await b.connections.save(mine)
-        try await b.secrets.setSecret("local-pw", for: mine.id, purpose: .password)
+        await b.secrets.setSecret("local-pw", for: mine.id, purpose: .password)
         let summary = try await b.merger.merge(sampleContents())
         #expect(summary.connectionsSkipped == 1 && summary.connectionsCreated == 2)
         let kept = try #require(try await b.connections.connection(id: mine.id))
@@ -262,7 +262,7 @@ private func sampleContents(includeSecrets: Bool = true) -> ExportContents {
         let a = try env()
         let c = makeConn()
         try await a.connections.save(c)
-        try await a.secrets.setSecret("x", for: c.id, purpose: .password)
+        await a.secrets.setSecret("x", for: c.id, purpose: .password)
         #expect(try await a.collector.collect(includeSecrets: false).secrets.isEmpty)
         #expect(try await a.collector.collect(includeSecrets: true).secrets[c.id] == [.password: "x"])
     }

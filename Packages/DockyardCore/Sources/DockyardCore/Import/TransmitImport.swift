@@ -164,14 +164,13 @@ enum KeyedArchive {
             guard dict.count == 1, let n = dict["CF$UID"] as? NSNumber else { return nil }
             return n.intValue
         }
-        let type = String(describing: Swift.type(of: value))
-        guard type.contains("KeyedArchiverUID") else { return nil }
+        let description = String(describing: value)
+        guard String(describing: Swift.type(of: value)).contains("KeyedArchiverUID") || description.contains("KeyedArchiverUID") else { return nil }
         if let child = Mirror(reflecting: value).children.first(where: { $0.label == "value" })?.value {
             if let n = child as? Int { return n }
             if let n = child as? UInt { return Int(n) }
             if let n = child as? UInt32 { return Int(n) }
         }
-        let description = String(describing: value)
         guard let range = description.range(of: #"value = (\d+)"#, options: .regularExpression) else { return nil }
         return Int(description[range].filter(\.isNumber))
     }
