@@ -3,13 +3,17 @@ import Testing
 @testable import ConnectionKit
 
 /// Runs against the containers from `scripts/integration-servers.sh`; skipped unless DOCKYARD_INTEGRATION=1.
-private enum Env {
+enum Env {
     static let enabled = ProcessInfo.processInfo.environment["DOCKYARD_INTEGRATION"] == "1"
     static let host = ProcessInfo.processInfo.environment["DOCKYARD_HOST"] ?? "127.0.0.1"
     static let user = "dockyard"
     static let password = "dockyard-test-pw"
     static let keyPassphrase = "dockyard-key-pw"
     static let sshPort = 2222
+    static let bothPort = 2223
+    static let kbdPort = 2224
+    static let slowPort = 2225
+    static let rootPassword = "root-test-pw"
     static let ftpPort = 2121
     static let vsftpdPort = 2122
 
@@ -21,11 +25,11 @@ private enum Env {
     static func key(_ name: String) -> String { keyDir + "/" + name }
 }
 
-private func sftpConfig(auth: AuthMethods, key: String? = nil, port: Int = Env.sshPort) -> ConnectionConfig {
+func sftpConfig(auth: AuthMethods, key: String? = nil, port: Int = Env.sshPort) -> ConnectionConfig {
     ConnectionConfig(protocol: .sftp, host: Env.host, port: port, username: Env.user, authMethods: auth, keyPath: key)
 }
 
-private func store(password: String? = Env.password, passphrase: String? = nil, for config: ConnectionConfig) async -> InMemorySecretStore {
+func store(password: String? = Env.password, passphrase: String? = nil, for config: ConnectionConfig) async -> InMemorySecretStore {
     let store = InMemorySecretStore()
     if let password { await store.setSecret(password, for: config.id, purpose: .password) }
     if let passphrase { await store.setSecret(passphrase, for: config.id, purpose: .keyPassphrase) }
@@ -33,7 +37,7 @@ private func store(password: String? = Env.password, passphrase: String? = nil, 
 }
 
 /// Collects log lines in the background so tests can assert on them.
-private final class LogCollector: Sendable {
+final class LogCollector: Sendable {
     private let lines = LockedBox<[LogLine]>([])
     private let task: Task<Void, Never>
 
@@ -50,13 +54,15 @@ private final class LogCollector: Sendable {
     deinit { task.cancel() }
 }
 
-private func randomData(_ count: Int) -> Data {
+func randomData(_ count: Int) -> Data {
     var generator = SystemRandomNumberGenerator()
-    return Data((0..<count).map { _ in UInt8.random(in: 0...255, using: &generator) })
+    var words = [UInt64](repeating: 0, count: (count + 7) / 8)
+    for index in words.indices { words[index] = generator.next() }
+    return words.withUnsafeBytes { Data($0.prefix(count)) }
 }
 
 /// The common create / upload / download / rename / delete scenario.
-private func exercise(_ fs: any RemoteFileSystem, supportsPermissions: Bool = true, missingDirectoryThrows: Bool = true, sourceLocation: SourceLocation = #_sourceLocation) async throws {
+func exercise(_ fs: any RemoteFileSystem, supportsPermissions: Bool = true, missingDirectoryThrows: Bool = true, sourceLocation: SourceLocation = #_sourceLocation) async throws {
     try await fs.connect()
     let home = try await fs.homeDirectory()
     _ = try await fs.list(home)
@@ -180,14 +186,13 @@ private func exercise(_ fs: any RemoteFileSystem, supportsPermissions: Bool = tr
         if let passphrase { #expect(!lines.contains { $0.message.contains(passphrase) }) }
     }
 
-    /// Citadel only signs with ssh-rsa (SHA-1); OpenSSH 8.8+ no longer accepts that. See docs/phase0-findings.md.
+    /// OpenSSH 9 refuses ssh-rsa (SHA-1) signatures, so this only passes with rsa-sha2-256/512.
     @Test func rsaKeyAuth() async throws {
         let config = sftpConfig(auth: .key, key: Env.key("id_rsa"))
         let fs = SFTPFileSystem(config: config, secrets: await store(password: nil, for: config))
-        await withKnownIssue("Citadel lacks rsa-sha2-256/512 signatures") {
-            try await fs.connect()
-            await fs.disconnect()
-        }
+        try await fs.connect()
+        _ = try await fs.list(try await fs.homeDirectory())
+        await fs.disconnect()
     }
 
     @Test func keyThenPasswordFallsBackToPassword() async throws {
