@@ -97,3 +97,8 @@ jobs:
           grep -E "error:" "$RUNNER_TEMP/xcodebuild.log" | sort -u | head -60 | while IFS= read -r line; do echo "::error::$line"; done
           grep -E "warning:" "$RUNNER_TEMP/xcodebuild.log" | grep -v "Node.js" | sort -u | head -60 | while IFS= read -r line; do echo "::warning::$line"; done
           true
+      - name: Build log tail
+        if: failure()
+        run: |
+          tail -n 60 "$RUNNER_TEMP/xcodebuild.log" | cut -c1-400 | while IFS= read -r line; do echo "::notice::$line"; done
+          true
