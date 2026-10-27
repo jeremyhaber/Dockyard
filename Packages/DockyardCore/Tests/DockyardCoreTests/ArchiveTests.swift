@@ -11,12 +11,11 @@ let nastyNames = [
 /// Relative path -> contents for every file below `root`.
 func tree(_ root: URL) -> [String: String] {
     var out: [String: String] = [:]
-    // The enumerator reports resolved paths (/private/var/... on macOS for /var/...), so resolve the root too.
-    let root = root.resolvingSymlinksInPath()
-    guard let walker = FileManager.default.enumerator(at: root, includingPropertiesForKeys: [.isRegularFileKey]) else { return out }
-    for case let url as URL in walker {
+    // Relative paths come straight from the enumerator, so /var vs /private/var symlinks on macOS don't matter.
+    guard let walker = FileManager.default.enumerator(atPath: root.path) else { return out }
+    for case let relative as String in walker {
+        let url = root.appendingPathComponent(relative)
         guard (try? url.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true else { continue }
-        let relative = String(url.path.dropFirst(root.path.count + 1))
         out[relative] = try? String(contentsOf: url, encoding: .utf8)
     }
     return out
