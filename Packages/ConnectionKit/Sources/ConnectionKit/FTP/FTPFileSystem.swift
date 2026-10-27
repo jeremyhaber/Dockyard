@@ -79,8 +79,14 @@ public actor FTPFileSystem: RemoteFileSystem {
         self.control = control
         hub.emit(.status, "Connection established, waiting for welcome message...")
 
-        let greeting = try await control.readReply()
-        guard greeting.isCompletion else { throw RemoteError.serverRejected(code: greeting.code, message: greeting.message) }
+        let greeting: FTPReply
+        do { greeting = try await control.readReply() } catch RemoteError.notConnected {
+            throw RemoteError.connectionRefused("The server closed the connection before sending a greeting")
+        }
+        guard greeting.isCompletion else {
+            throw RemoteError.ftpRefusal(code: greeting.code, message: greeting.message)
+                ?? RemoteError.serverRejected(code: greeting.code, message: greeting.message)
+        }
 
         if config.protocol == .ftps {
             _ = try check(try await control.command("AUTH TLS"), "AUTH TLS", { $0.code == 234 })
@@ -121,6 +127,7 @@ public actor FTPFileSystem: RemoteFileSystem {
             reply = try await control.command("PASS \(password)")
         }
         guard reply.isCompletion else {
+            if let refusal = RemoteError.ftpRefusal(code: reply.code, message: reply.message) { throw refusal }
             if reply.code == 530 { throw RemoteError.authenticationFailed(reply.message) }
             throw RemoteError.serverRejected(code: reply.code, message: reply.message)
         }

@@ -49,6 +49,9 @@ public enum RemoteError: Error, Equatable, CustomStringConvertible {
     case unsupported(String)
     case invalidConfiguration(String)
     case hostKeyRejected(String)
+    /// The server would not take another connection right now: connection limit, rate limit or a
+    /// disconnect while connecting or logging in. Retrying later, or with fewer connections, may work.
+    case connectionRefused(String)
 
     public var description: String {
         switch self {
@@ -61,7 +64,29 @@ public enum RemoteError: Error, Equatable, CustomStringConvertible {
         case .unsupported(let m): "Unsupported: \(m)"
         case .invalidConfiguration(let m): "Invalid configuration: \(m)"
         case .hostKeyRejected(let fingerprint): "Host key rejected (\(fingerprint))"
+        case .connectionRefused(let m): "Connection refused: \(m)"
         }
+    }
+
+    /// True when `message` reads like a server-side connection limit or rate limit.
+    public static func looksLikeConnectionLimit(_ message: String) -> Bool {
+        let text = message.lowercased()
+        return connectionLimitPhrases.contains { text.contains($0) }
+    }
+
+    private static let connectionLimitPhrases = [
+        "too many connections", "too many users", "too many clients", "too many sessions", "too many logins",
+        "too many concurrent", "too many from", "maximum number of clients", "max clients", "maximum connections",
+        "connection limit", "connections from your", "rate limit", "rate-limit", "throttl", "try again later",
+        "maxstartups", "too many authentication failures", "server is full", "server busy",
+    ]
+
+    /// Maps an unsuccessful FTP reply during connect or login to a refusal when it is one.
+    static func ftpRefusal(code: Int, message: String) -> RemoteError? {
+        if code == 421 || looksLikeConnectionLimit(message) && [421, 425, 426, 430, 530, 550].contains(code) {
+            return .connectionRefused("\(code) \(message)")
+        }
+        return nil
     }
 }
 

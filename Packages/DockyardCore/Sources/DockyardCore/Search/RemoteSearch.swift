@@ -191,7 +191,7 @@ private struct ShellSearch {
 
     /// `sh -c 'echo $$; exec "$@"'` prints the pid first so the process can be killed on cancel.
     private func wrap(_ arguments: [String]) -> String {
-        "sh -c 'echo $$; exec \"$@\"' sh " + ShellQuote.quote(arguments)
+        "sh -c 'echo $$; exec \"$@\"' sh " + ShellQuote.join(arguments)
     }
 
     private var root: String { query.root.hasPrefix("-") ? "./" + query.root : query.root }
