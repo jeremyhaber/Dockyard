@@ -12,6 +12,9 @@ extension AppModel {
     /// Saves the draft and its typed-in secrets. Returns the stored connection.
     func save(_ draft: SiteDraft) async throws -> Connection {
         let connection = try draft.connection()
+        do { _ = try JumpChain.resolve(for: connection, lookup: jumpLookup(replacing: connection)) } catch {
+            throw SiteDraftError.jump("\(error)")
+        }
         let saved = try await connections.saveEdited(connection)
         for (purpose, value) in draft.secretsToStore {
             try await secrets.setSecret(value, for: saved.id, purpose: purpose)
@@ -47,7 +50,9 @@ extension AppModel {
                 return ConnectionTestResult(success: false, message: "Enter a password to test the connection.")
             }
             let validator = hostKeyValidator(host: connection.host, port: connection.port, log: log)
-            let fs = try FileSystemFactory.make(for: connection, secrets: store, hostKeyValidator: validator)
+            let fs = try FileSystemFactory.make(
+                for: connection, secrets: store, hostKeyValidator: validator,
+                jumpHops: try jumpHops(for: connection, log: log))
             try await fs.connect()
             let home = (try? await fs.homeDirectory()) ?? "/"
             let count = try await fs.list(home).count

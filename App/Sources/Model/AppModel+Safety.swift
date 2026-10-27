@@ -101,7 +101,7 @@ extension AppModel {
                 showToast("Demo: would open \(target) for \(account) on \(source.label)", symbol: "safari")
                 return
             }
-            guard let token = try await secrets.secret(for: source.id, purpose: .cloudToken), !token.isEmpty else {
+            guard let token = try await ungatedSecrets.secret(for: source.id, purpose: .cloudToken), !token.isEmpty else {
                 throw WHMError.api("No API token saved for \(source.label)")
             }
             let client = WHMClient(host: source.host, port: source.apiPort, apiUser: source.apiUser, token: token,

@@ -9,6 +9,7 @@ final class FileNSTableView: NSTableView {
     var onCommandClickRow: ((Int) -> Bool)?
     var onReturn: (() -> Void)?
     var onDeleteKey: (() -> Void)?
+    var onSpace: (() -> Void)?
     var onFocus: (() -> Void)?
 
     override func mouseDown(with event: NSEvent) {
@@ -23,6 +24,7 @@ final class FileNSTableView: NSTableView {
         switch event.keyCode {
         case 36, 76: onReturn?()
         case 51, 117: onDeleteKey?()
+        case 49 where event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty: onSpace?()
         default: super.keyDown(with: event)
         }
     }
@@ -202,6 +204,7 @@ final class FileTableCoordinator: NSObject, NSTableViewDataSource, NSTableViewDe
         table.onCommandClickRow = { [weak self] row in self?.commandClick(row) ?? false }
         table.onReturn = { [weak self] in self?.openSelection() }
         table.onDeleteKey = { [weak self] in self?.deleteSelection() }
+        table.onSpace = { [weak self] in self?.quickLook() }
         table.onFocus = { [weak self] in
             guard let self else { return }
             self.app.focusedSide = self.pane.side
@@ -344,6 +347,10 @@ final class FileTableCoordinator: NSObject, NSTableViewDataSource, NSTableViewDe
         app.edits.edit(item, in: session)
     }
 
+    private func quickLook() {
+        QuickLookCenter.shared.toggle(pane.selectedItems, side: pane.side, session: session)
+    }
+
     private func commandClick(_ row: Int) -> Bool {
         guard row < rows.count, case .item(let item) = rows[row], item.isDirectory else { return false }
         pane.openTab(at: item.path, activate: false)
@@ -421,6 +428,7 @@ final class FileTableCoordinator: NSObject, NSTableViewDataSource, NSTableViewDe
         }
 
         add("Open", #selector(menuOpen), enabled: !selection.isEmpty)
+        add("Quick Look", #selector(menuQuickLook), enabled: items.contains { !$0.isDirectory })
         if items.count == 1, items[0].isDirectory { add("Open in New Tab", #selector(menuOpenInTab)) }
         menu.addItem(.separator())
         if pane.side == .local {
@@ -462,6 +470,8 @@ final class FileTableCoordinator: NSObject, NSTableViewDataSource, NSTableViewDe
     }
 
     @objc private func menuOpen() { openSelection() }
+
+    @objc private func menuQuickLook() { quickLook() }
 
     @objc private func menuOpenInTab() {
         if let item = pane.selectedItems.first { pane.openTab(at: item.path, activate: false) }

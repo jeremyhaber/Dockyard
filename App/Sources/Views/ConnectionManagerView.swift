@@ -117,12 +117,23 @@ struct ConnectionManagerView: View {
                         }
                 }
                 scopeRow("FileZilla import", icon: "square.and.arrow.down", scope: .filezilla, count: model.count(for: .filezillaImport))
+                importedScopeRow("Transmit import", scope: .imported(.transmitImport))
+                importedScopeRow("Cyberduck import", scope: .imported(.cyberduckImport))
+                importedScopeRow("SSH config", scope: .imported(.sshConfigImport))
                 scopeRow("Added by hand", icon: "hand.point.up.left", scope: .manual, count: model.count(for: .manual))
                 scopeRow("Quick connect", icon: "bolt", scope: .quickConnect, count: model.count(for: .quickConnect))
             }
             .padding(8)
         }
         .background(Palette.chromeAlt)
+    }
+
+    /// Imports from apps the user may not have used only get a row once something came from them.
+    @ViewBuilder
+    private func importedScopeRow(_ title: String, scope: ManagerScope) -> some View {
+        if case .imported(let source) = scope, model.count(for: source) > 0 {
+            scopeRow(title, icon: "square.and.arrow.down", scope: scope, count: model.count(for: source))
+        }
     }
 
     private func scopeRow(_ title: String, icon: String, scope: ManagerScope, count: Int?) -> some View {
@@ -161,6 +172,10 @@ struct ConnectionManagerView: View {
                 .background(Palette.chrome, in: RoundedRectangle(cornerRadius: 6))
                 Menu {
                     Button("FileZilla sitemanager.xml\u{2026}") { importFileZilla() }
+                    Button("Transmit favorites\u{2026}") { app.startImport(.transmit) { model.notice = $0 } }
+                    Button("Cyberduck bookmarks\u{2026}") { app.startImport(.cyberduck) { model.notice = $0 } }
+                    Button("SSH config (~/.ssh/config)\u{2026}") { app.startImport(.sshConfig) { model.notice = $0 } }
+                    Divider()
                     Button("WHM server\u{2026}") { showWHM = true }
                 } label: {
                     Text("Import\u{2026}")

@@ -16,6 +16,7 @@ struct SettingsView: View {
                 }
             }
             TransferSettingsSections()
+            MacSettingsSections()
             Section("Logging") {
                 Toggle("Write a log file for each connection", isOn: $writeLogFiles)
                 Text("Kept in ~/Library/Logs/Dockyard. Applies to connections opened from now on.")
@@ -43,7 +44,7 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 520, height: 760)
+        .frame(width: 520, height: 680)
         .background(WindowAccessor { window in DemoWindows.register("settings", window) })
     }
 

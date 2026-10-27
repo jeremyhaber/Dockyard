@@ -56,6 +56,8 @@ final class AppModel {
     let snippets: SnippetRepository
     let journal: ChangeJournal
     let secrets: any SecretStore
+    /// The Keychain store without the Touch ID gate, for reads that are not about connecting (is a password saved, WHM sync).
+    let ungatedSecrets: any SecretStore
     let quickConnectService: QuickConnectService
     let sessionService: SessionService
     let whmSync: WHMSyncService
@@ -120,7 +122,8 @@ final class AppModel {
             // An in-memory database cannot fail to open.
             db = (try? DockyardDatabase()) ?? { fatalError("in-memory database unavailable") }()
         }
-        let secrets = FileSystemFactory.secretStore()
+        let ungated = FileSystemFactory.secretStore()
+        let secrets: any SecretStore = DemoMode.isEnabled ? ungated : GatedSecretStore(base: ungated)
         let prompts = PromptCenter()
         let repo = ConnectionRepository(database: db)
         let sessionRepo = SessionRepository(database: db)
@@ -135,9 +138,10 @@ final class AppModel {
         self.snippets = SnippetRepository(database: db)
         self.journal = ChangeJournal(database: db)
         self.secrets = secrets
-        self.quickConnectService = QuickConnectService(repository: repo, secrets: secrets)
+        self.ungatedSecrets = ungated
+        self.quickConnectService = QuickConnectService(repository: repo, secrets: ungated)
         self.sessionService = SessionService(repository: sessionRepo, saver: SessionSaver(repository: sessionRepo))
-        self.whmSync = WHMSyncService(repository: repo, sources: sources, secrets: secrets)
+        self.whmSync = WHMSyncService(repository: repo, sources: sources, secrets: ungated)
         self.prompts = prompts
         // The queue keeps its jobs in the app database, opens its own pooled sessions per registered site and
         // starts restored jobs paused until `offerToResumeTransfers` has asked.
@@ -197,7 +201,8 @@ final class AppModel {
     func makeQueueSession(for connection: Connection) throws -> any RemoteFileSystem {
         let log = session(for: connection.id)?.log ?? LogBuffer()
         let validator = hostKeyValidator(host: connection.host, port: connection.port, log: log)
-        return try FileSystemFactory.make(for: connection, secrets: secrets, hostKeyValidator: validator)
+        return try FileSystemFactory.make(
+            for: connection, secrets: secrets, hostKeyValidator: validator, jumpHops: try jumpHops(for: connection, log: log))
     }
 
     func registerTransferSite(_ connection: Connection) {
@@ -289,6 +294,7 @@ final class AppModel {
     private func handle(_ snapshot: TransferSnapshot) {
         transfers = snapshot
         trackTransferFailures(snapshot)
+        Notifier.shared.observe(snapshot)
         journalCompletedTransfers(snapshot)
         let idle = snapshot.isIdle
         if idle && !wasIdle {
@@ -440,7 +446,8 @@ final class AppModel {
                 let validator = hostKeyValidator(host: session.connection.host, port: session.connection.port, log: session.log)
                 let asRoot = await shouldBrowseAsRoot(session)
                 let fs = try FileSystemFactory.make(
-                    for: session.connection, secrets: secrets, hostKeyValidator: validator, browseAsRoot: asRoot)
+                    for: session.connection, secrets: secrets, hostKeyValidator: validator, browseAsRoot: asRoot,
+                    jumpHops: try jumpHops(for: session.connection, log: session.log))
                 session.attach(fs)
                 try await fs.connect()
                 try Task.checkCancellation()
@@ -529,7 +536,7 @@ final class AppModel {
         switch c.protocol {
         case .rclone:
             guard let cloud = c.cloud, let backend = RcloneBackend(rawValue: cloud.backend) else { return }
-            let existing = try? await secrets.secret(for: c.id, purpose: .cloudToken)
+            let existing = try await storedSecret(c.id, .cloudToken)
             if let existing, !existing.isEmpty, !forcePrompt {
                 log.registerSecret(existing)
                 return
@@ -543,8 +550,9 @@ final class AppModel {
                     connection: c, purpose: .cloudToken, log: log)
             }
         case .sftp, .ftp, .ftps:
+            try await ensureJumpCredentials(for: c, log: log)
             guard usesStoredPassword(c) else { return }
-            let existing = try? await secrets.secret(for: c.id, purpose: .password)
+            let existing = try await storedSecret(c.id, .password)
             if let existing, !existing.isEmpty, !forcePrompt {
                 log.registerSecret(existing)
                 return

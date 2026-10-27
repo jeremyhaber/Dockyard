@@ -29,6 +29,7 @@ enum DemoMode {
         case "connectionManager": "manager"
         case "settings": "settings"
         case "watchFolders": "watch"
+        case "quickLook": "quickLook"
         default: "main"
         }
     }

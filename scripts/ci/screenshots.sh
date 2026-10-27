@@ -13,7 +13,7 @@ shoot() { # name, appearance (light|dark), screen
   local idfile="$RUNNER_TEMP/window-$name.id"
   # Sheets and popovers are only redrawn on the visible part of the screen, so those shots use a window that fits it.
   local size=1440x900
-  case "$screen" in compare|recentChanges|siteEditor|siteEditorSafety|versions|conflict|launchPrompt) size=1000x680 ;; esac
+  case "$screen" in compare|recentChanges|siteEditor|siteEditorJump|siteEditorSafety|versions|conflict|launchPrompt|importPreview|importUnsupported|export|importExport) size=1000x680 ;; esac
   rm -f "$idfile"
   "$bin" -DockyardDemo YES -DockyardAppearance "$look" -DockyardDemoScreen "$screen" \
     -DockyardWindowSize "$size" -DockyardWindowIDFile "$idfile" -ApplePersistenceIgnoreState YES >"$out/$name.log" 2>&1 &
@@ -33,7 +33,7 @@ shoot() { # name, appearance (light|dark), screen
   [ -s "$out/$name.log" ] || rm -f "$out/$name.log"
 }
 
-for screen in main connectionManager siteEditor logDrawer jump terminal sideBySide compare editing recentChanges settings \
+for screen in main connectionManager siteEditor siteEditorJump logDrawer jump terminal sideBySide compare editing recentChanges settings importPreview importUnsupported export importExport quickLook \
   transfers transfersFailed versions search watchFolders siteEditorSafety launchPrompt conflict; do
   shoot "$screen" light "$screen"
 done
