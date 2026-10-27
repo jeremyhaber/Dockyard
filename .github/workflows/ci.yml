@@ -9,6 +9,9 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: write
+
 jobs:
   packages-macos:
     runs-on: macos-latest
@@ -61,6 +64,27 @@ jobs:
             -derivedDataPath "$RUNNER_TEMP/DerivedData" CODE_SIGNING_ALLOWED=NO build 2>&1 \
             | tee "$RUNNER_TEMP/xcodebuild.log" | tail -n 40
           test -d "$RUNNER_TEMP/DerivedData/Build/Products/Debug/Dockyard.app"
+      - name: Screenshots (demo mode)
+        if: success()
+        run: scripts/ci/screenshots.sh "$RUNNER_TEMP/DerivedData/Build/Products/Debug/Dockyard.app" "$RUNNER_TEMP/screenshots"
+      - name: Upload screenshots
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: ${{ runner.temp }}/screenshots
+      - name: Publish screenshots branch
+        if: success() && github.event_name == 'push'
+        env:
+          REF: ${{ github.ref_name }}
+        run: |
+          cd "$RUNNER_TEMP/screenshots"
+          git init -q -b screenshots
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "Screenshots for $REF @ ${GITHUB_SHA::7}"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" "HEAD:refs/heads/screenshots/$REF"
       - name: Compiler diagnostics
         if: always()
         run: |
