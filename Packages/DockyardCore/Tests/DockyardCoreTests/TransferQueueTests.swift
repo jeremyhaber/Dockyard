@@ -483,6 +483,20 @@ func upload(_ env: TransferEnv, _ rel: String, to server: TransferEndpoint, _ de
         #expect(snap.jobs.count == 1 && snap.jobs[0].state == .completed)
     }
 
+    @Test func removeFinishedForgetsCancelledOnlyWhenAsked() async throws {
+        let env = try TransferEnv()
+        try env.write("a", "a")
+        let server = FakeFileSystem(); server.makeDir("/d")
+        let q = env.queue()
+        await q.pause()
+        await q.enqueue(upload(env, "a", to: TransferEndpoint(fs: server, label: "S"), "/d/a"))
+        await q.cancelAll()
+        await q.removeFinished()
+        #expect(await q.count() == 1)
+        await q.removeFinished(includingCancelled: true)
+        #expect(await q.count() == 0)
+    }
+
     @Test func removeFinishedKeepsFailures() async throws {
         let env = try TransferEnv()
         try env.write("a", "a"); try env.write("b", "b")

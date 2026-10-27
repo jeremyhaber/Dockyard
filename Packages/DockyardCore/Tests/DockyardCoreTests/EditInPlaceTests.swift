@@ -127,6 +127,24 @@ import ConnectionKit
         await e.coordinator.stopAll()
     }
 
+    @Test func originalVersionIsKeptOnceBeforeTheFirstUpload() async throws {
+        let e = try env()
+        defer { try? FileManager.default.removeItem(at: e.root) }
+        let seen = LockedBox<[(String, String?)]>([])
+        let s = try await e.coordinator.open(
+            fs: e.server, remotePath: "/www/index.php", connectionId: connA, connectionName: "Prod",
+            beforeOverwrite: { [server = e.server] path, _ in seen.withLock { $0.append((path, server.text(path))) } })
+        try save(s.localURL, "one", mtime: t0.addingTimeInterval(10))
+        await settle(e.clock)
+        #expect(await waitUntil { e.server.text("/www/index.php") == "one" })
+        try save(s.localURL, "two", mtime: t0.addingTimeInterval(20))
+        await settle(e.clock)
+        #expect(await waitUntil { e.server.text("/www/index.php") == "two" })
+        let calls = seen.withLock { $0 }
+        #expect(calls.count == 1 && calls[0].0 == "/www/index.php" && calls[0].1 == "<?php echo 1;")
+        await e.coordinator.stopAll()
+    }
+
     @Test func failedUploadKeepsLocalFileAndCanBeRetried() async throws {
         let e = try env()
         defer { try? FileManager.default.removeItem(at: e.root) }

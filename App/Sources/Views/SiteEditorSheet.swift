@@ -22,6 +22,7 @@ struct SiteEditorSheet: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            ScrollViewReader { proxy in
             Form {
                 generalSection
                 if draft.protocolChoice == .cloud {
@@ -35,9 +36,14 @@ struct SiteEditorSheet: View {
                     }
                 }
                 finderSection
+                SiteEditorSafetySection(draft: $draft)
                 otherSection
             }
             .formStyle(.grouped)
+            .onAppear {
+                if DemoMode.screen == "siteEditorSafety" { proxy.scrollTo(SiteEditorSafetySection.anchor, anchor: .top) }
+            }
+            }
             Divider()
             buttons
         }

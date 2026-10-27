@@ -109,8 +109,8 @@ extension TransferQueue {
 
     // MARK: Removal
 
-    /// Forgets completed, skipped and cancelled top-level jobs together with their children.
-    public func removeFinished() { remove(topLevelStates: "2, 4, 5") }
+    /// Forgets completed and skipped top-level jobs together with their children; cancelled ones too when asked.
+    public func removeFinished(includingCancelled: Bool = false) { remove(topLevelStates: includingCancelled ? "2, 4, 5" : "2, 5") }
 
     /// Forgets failed top-level jobs together with their children.
     public func removeFailed() { remove(topLevelStates: "3") }

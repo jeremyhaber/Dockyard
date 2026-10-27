@@ -28,6 +28,7 @@ struct TransferBar: View {
                     .lineLimit(1)
             }
             skippedLabel(s)
+            WatchIndicator()
             EditingIndicator()
             ArchiveIndicator()
 

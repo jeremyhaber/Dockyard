@@ -31,11 +31,12 @@ struct TransfersView: View {
                     .accessibilityLabel("Back to all transfers, leaving \(folder.name)")
                 }
                 Spacer()
-                if snapshot.filteredCount > 0 {
-                    Label("\(snapshot.filteredCount.formatted()) skipped", systemImage: "line.3.horizontal.decrease")
+                if let skips = skipSummary(snapshot) {
+                    Label(skips, systemImage: "line.3.horizontal.decrease")
                         .font(.system(size: 11))
                         .foregroundStyle(Palette.textSecondary)
-                        .help("Left out by transfer filters (.DS_Store, node_modules/ and your own rules)")
+                        .lineLimit(1)
+                        .help("Existing files left alone by your rules, and items left out by transfer filters (.DS_Store, node_modules/ and your own)")
                 }
                 Button("Retry all failed") { app.retryFailedTransfers() }
                     .disabled(snapshot.failedCount == 0)
@@ -62,6 +63,15 @@ struct TransfersView: View {
                 openFolder: { folder = $0 })
                 .overlay { if snapshot.isIdle && TransferTab.done.count(in: snapshot) + snapshot.failedCount == 0 { emptyHint } }
         }
+    }
+
+    /// "312 skipped: unchanged \u{00B7} 4 skipped: kept existing \u{00B7} 9 skipped: filters"
+    private func skipSummary(_ s: TransferSnapshot) -> String? {
+        var parts = SkipReason.allCases.compactMap { reason in
+            s.skipReasons[reason].map { "\($0.formatted()) skipped: \(reason.title)" }
+        }
+        if s.filteredCount > 0 { parts.append("\(s.filteredCount.formatted()) skipped: filters") }
+        return parts.isEmpty ? nil : parts.joined(separator: " \u{00B7} ")
     }
 
     private var emptyHint: some View {
@@ -377,10 +387,10 @@ final class TransferTableCoordinator: NSObject, NSTableViewDataSource, NSTableVi
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         guard let id = tableColumn?.identifier.rawValue, let column = Column(rawValue: id) else { return nil }
-        let job = job(at: row)
+        let job = self.job(at: row)
         switch column {
         case .name:
-            let cell = reuse(tableView, id, NameCell.self)
+            let cell = reuse(tableView, id) { NameCell() }
             guard let job else {
                 cell.title.stringValue = "Loading\u{2026}"
                 cell.detail.stringValue = ""
@@ -401,7 +411,7 @@ final class TransferTableCoordinator: NSObject, NSTableViewDataSource, NSTableVi
             cell.icon.contentTintColor = Self.tint(job.state)
             return cell
         case .progress:
-            let cell = reuse(tableView, id, ProgressCell.self)
+            let cell = reuse(tableView, id) { ProgressCell() }
             let running = job?.state == .running || job?.state == .completed
             cell.bar.isHidden = !running
             cell.label.isHidden = !running
@@ -415,7 +425,7 @@ final class TransferTableCoordinator: NSObject, NSTableViewDataSource, NSTableVi
             }
             return cell
         default:
-            let cell = reuse(tableView, id, TextCell.self)
+            let cell = reuse(tableView, id) { TextCell() }
             cell.label.textColor = .secondaryLabelColor
             guard let job else { cell.label.stringValue = ""; return cell }
             switch column {
@@ -424,7 +434,7 @@ final class TransferTableCoordinator: NSObject, NSTableViewDataSource, NSTableVi
             case .size:
                 cell.label.stringValue = job.bytesTotal > 0 ? FileDisplay.size(job.bytesTotal) : "\u{2014}"
             case .speed:
-                let rate = speeds[job.id]?.rate ?? 0
+                let rate = DemoMode.isEnabled ? Double(4_000_000 + job.name.count * 310_000) : (speeds[job.id]?.rate ?? 0)
                 cell.label.stringValue = job.state == .running && rate > 0 ? "\(FileDisplay.size(UInt64(rate)))/s" : ""
             default:
                 cell.label.stringValue = Self.status(job)
@@ -434,10 +444,10 @@ final class TransferTableCoordinator: NSObject, NSTableViewDataSource, NSTableVi
         }
     }
 
-    private func reuse<T: NSTableCellView>(_ table: NSTableView, _ id: String, _: T.Type) -> T {
+    private func reuse<T: NSTableCellView>(_ table: NSTableView, _ id: String, make: () -> T) -> T {
         let identifier = NSUserInterfaceItemIdentifier("transfer-\(id)")
         if let cell = table.makeView(withIdentifier: identifier, owner: self) as? T { return cell }
-        let cell = T()
+        let cell = make()
         cell.identifier = identifier
         return cell
     }
@@ -445,7 +455,7 @@ final class TransferTableCoordinator: NSObject, NSTableViewDataSource, NSTableVi
     // MARK: Actions
 
     @objc private func doubleClicked() {
-        guard let table, let job = job(at: table.clickedRow), job.isDirectory, job.childCount > 0 else { return }
+        guard let table, let job = self.job(at: table.clickedRow), job.isDirectory, job.childCount > 0 else { return }
         openFolder(job)
     }
 

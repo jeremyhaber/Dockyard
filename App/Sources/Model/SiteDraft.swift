@@ -63,6 +63,11 @@ struct SiteDraft {
     var mountOnLaunch = false
     var mountReadOnly = false
     var readOnly = false
+    var keepVersionsOnOverwrite = false
+    var trashOnDelete = false
+    var verifyChecksums = false
+    var transferFilters = ""
+    var defaultConflict = ConflictPolicy.ask
     var maxConnections = Connection.defaultMaxConnections
     var connectDelayMs = 0
     var localFolder = ""
@@ -106,6 +111,11 @@ struct SiteDraft {
         mountOnLaunch = c.mountOnLaunch
         mountReadOnly = c.mountReadOnly
         readOnly = c.readOnly
+        keepVersionsOnOverwrite = c.keepVersionsOnOverwrite
+        trashOnDelete = c.trashOnDelete
+        verifyChecksums = c.verifyChecksums
+        transferFilters = c.transferFilters.joined(separator: "\n")
+        defaultConflict = c.defaultConflictAction ?? .ask
         maxConnections = c.maxConnections
         connectDelayMs = c.connectDelayMs
         localFolder = c.localFolder ?? ""
@@ -169,6 +179,12 @@ struct SiteDraft {
         c.mountOnLaunch = mountOnLaunch
         c.mountReadOnly = mountReadOnly
         c.readOnly = readOnly
+        c.keepVersionsOnOverwrite = keepVersionsOnOverwrite
+        c.trashOnDelete = trashOnDelete
+        c.verifyChecksums = proto == .sftp && verifyChecksums
+        c.transferFilters = transferFilters.split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        c.defaultConflictAction = defaultConflict == .ask ? nil : defaultConflict
         c.maxConnections = min(max(maxConnections, Connection.maxConnectionsRange.lowerBound), Connection.maxConnectionsRange.upperBound)
         c.connectDelayMs = max(0, connectDelayMs)
         c.localFolder = localFolder.trimmingCharacters(in: .whitespaces).isEmpty ? nil : localFolder

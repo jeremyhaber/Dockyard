@@ -56,13 +56,19 @@ struct MainWindow: View {
         .sheet(isPresented: compareBinding) {
             if let session = app.activeSession { CompareSheet(session: session) }
         }
+        .sheet(item: versionsBinding) { session in VersionsSheet(session: session) }
         .background(WindowAccessor { window in DemoWindows.register("main", window) })
         .frame(minWidth: 980, minHeight: 620)
         .task {
             guard DemoMode.isEnabled else { return }
             if DemoMode.screen == "connectionManager" { openWindow(id: "manager") }
             if DemoMode.screen == "settings" { openSettings() }
+            if DemoMode.screen == "watchFolders" { openWindow(id: "watch") }
         }
+    }
+
+    private var versionsBinding: Binding<ConnectionSession?> {
+        Binding(get: { app.versionsSession }, set: { if $0 == nil { app.safety.versionsSessionID = nil } })
     }
 
     private var compareBinding: Binding<Bool> {
@@ -154,6 +160,24 @@ struct MainToolbar: ToolbarContent {
             }
             .disabled(!(app.activeSession?.status.isConnected ?? false))
             .help("Disconnect the active connection")
+
+            if let session = app.activeSession {
+                Button {
+                    app.showVersions(for: session)
+                } label: {
+                    Label("Versions", systemImage: "clock.arrow.circlepath")
+                }
+                .disabled(!session.status.isConnected)
+                .help("Kept versions and trashed files on this site")
+                if app.canOpenCPanel(session.connection) {
+                    Button {
+                        app.openCPanel(for: session.connection)
+                    } label: {
+                        Label("Open cPanel", systemImage: "safari")
+                    }
+                    .help("Open this account's cPanel in your browser, already signed in")
+                }
+            }
         }
     }
 
@@ -236,6 +260,12 @@ struct ConnectionTab: View {
         .contextMenu {
             Button("Reconnect") { app.reconnect(session) }
             Button("Open in New Tab") { app.open(session.connection, newTab: true) }
+            Divider()
+            Button("Versions\u{2026}") { app.showVersions(for: session) }
+                .disabled(!session.status.isConnected)
+            if app.canOpenCPanel(session.connection) {
+                Button("Open cPanel") { app.openCPanel(for: session.connection) }
+            }
             Divider()
             Button("Close Tab") { app.close(session) }
         }

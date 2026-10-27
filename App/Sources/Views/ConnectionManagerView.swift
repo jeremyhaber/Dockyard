@@ -111,6 +111,10 @@ struct ConnectionManagerView: View {
                     .padding(.horizontal, 8)
                 ForEach(model.whmSources) { source in
                     scopeRow(source.label, icon: "server.rack", scope: .whm(source.id), count: model.count(for: .whm(source.id)))
+                        .contextMenu {
+                            Button("Open WHM") { app.openWHM(source) }
+                            Button("Sync Now") { Task { _ = await app.syncWHM(source); await model.reload(app: app) } }
+                        }
                 }
                 scopeRow("FileZilla import", icon: "square.and.arrow.down", scope: .filezilla, count: model.count(for: .filezillaImport))
                 scopeRow("Added by hand", icon: "hand.point.up.left", scope: .manual, count: model.count(for: .manual))
@@ -290,6 +294,8 @@ struct WHMSheet: View {
                                 Text(syncText(source)).font(.caption).foregroundStyle(Palette.textSecondary)
                             }
                             Spacer()
+                            Button("Open WHM") { app.openWHM(source) }
+                                .help("Open WHM in your browser, already signed in")
                             Button("Sync now") { sync(source) }.disabled(busy)
                             Button(role: .destructive) {
                                 Task { try? await app.whmSources.delete(source.id); await model.reload(app: app) }

@@ -217,6 +217,10 @@ final class ConnectionSession: Identifiable {
                     try FileManager.default.trashItem(at: URL(fileURLWithPath: item.path), resultingItemURL: nil)
                     self.log.append(.status, "Moved \(item.path) to the Trash")
                 } else {
+                    if side == .server, self.connection.trashOnDelete {
+                        let outcome = try await AppModel.shared.safetyNet(for: self.connection).prepareDelete(path: item.path, on: pane.fs)
+                        if !outcome.originalStillInPlace { continue }
+                    }
                     try await pane.fs.delete(item.path, recursive: item.isDirectory)
                     if side == .local { self.log.append(.status, "Deleted \(item.path)") }
                 }

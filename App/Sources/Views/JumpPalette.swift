@@ -98,7 +98,7 @@ struct JumpPalette: View {
                     Text(subtitle(c)).font(.system(size: 11)).foregroundStyle(Palette.textSecondary)
                 }
             case .folder(let f, let c):
-                Image(systemName: "folder").foregroundStyle(Color.accentColor)
+                Image(systemName: f.isPinned ? "pin.fill" : "folder").foregroundStyle(Color.accentColor)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(f.path).font(.system(size: 12, design: .monospaced)).lineLimit(1).truncationMode(.head)
                     Text(c.name).font(.system(size: 11)).foregroundStyle(Palette.textSecondary)

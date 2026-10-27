@@ -64,6 +64,8 @@ final class AppModel {
     let edits = EditCenter()
     let archives = ArchiveCenter()
     let transferUI = TransferCenter()
+    let safety = SafetyCenter()
+    let watches = WatchCenter()
     let mounts = MountService()
     private(set) var startupError: String?
 
@@ -160,6 +162,7 @@ final class AppModel {
             startWHMScheduler()
             migrateSecretsIfNeeded()
             startFinderLogRelay()
+            watches.start()
             Task { await offerToResumeTransfers() }
         }
     }
@@ -180,19 +183,24 @@ final class AppModel {
     /// What the queue needs to open extra pooled connections to `connection` (limits, back-off and
     /// persistence across restarts all hang off this registration).
     func transferSite(for connection: Connection) -> TransferSite {
-        TransferSite(connection: connection) { [weak self] in
+        TransferSite(
+            connection: connection,
+            filter: TransferFilter(patterns: AppSettings.globalFilterPatterns + connection.transferFilters),
+            verifyChecksums: connection.verifyChecksums && connection.protocol == .sftp,
+            beforeOverwrite: overwriteHook(for: connection)
+        ) { [weak self] in
             guard let self else { throw AppError.cancelled }
             return try await self.makeQueueSession(for: connection)
         }
     }
 
-    private func makeQueueSession(for connection: Connection) throws -> any RemoteFileSystem {
+    func makeQueueSession(for connection: Connection) throws -> any RemoteFileSystem {
         let log = session(for: connection.id)?.log ?? LogBuffer()
         let validator = hostKeyValidator(host: connection.host, port: connection.port, log: log)
         return try FileSystemFactory.make(for: connection, secrets: secrets, hostKeyValidator: validator)
     }
 
-    private func registerTransferSite(_ connection: Connection) {
+    func registerTransferSite(_ connection: Connection) {
         let site = transferSite(for: connection)
         let queue = queue
         Task { await queue.register(site: site) }
@@ -389,6 +397,7 @@ final class AppModel {
             await edits.stopAll(connectionID: session.connection.id)
             await session.teardown()
             columnIDs.removeAll { $0 == session.id }
+            safety.forget(session)
             sessions.removeAll { $0.id == session.id }
             if !sessions.contains(where: { $0.connection.id == session.connection.id }) {
                 connections.openConnections.close(session.connection.id)
@@ -507,6 +516,7 @@ final class AppModel {
         server.start(expanded: serverExpanded)
         local.start(expanded: localExpanded)
         server.onVisit?(server.currentPath)
+        purgeKeptVersions(session)
         Task { await reloadQuickHistory() }
     }
 

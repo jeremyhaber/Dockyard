@@ -48,6 +48,11 @@ public struct SearchHit: Sendable, Equatable, Identifiable {
 public struct SearchProgress: Sendable, Equatable {
     public var foldersScanned: Int
     public var currentFolder: String
+
+    public init(foldersScanned: Int, currentFolder: String) {
+        self.foldersScanned = foldersScanned
+        self.currentFolder = currentFolder
+    }
 }
 
 public struct SearchSummary: Sendable, Equatable {
@@ -58,6 +63,10 @@ public struct SearchSummary: Sendable, Equatable {
     /// True when `find`/`grep` ran on the server; false when the listings were walked.
     public var usedShell: Bool
     public var error: String?
+
+    public init(hits: Int, truncated: Bool = false, cancelled: Bool = false, usedShell: Bool, error: String? = nil) {
+        self.hits = hits; self.truncated = truncated; self.cancelled = cancelled; self.usedShell = usedShell; self.error = error
+    }
 }
 
 public enum SearchEvent: Sendable, Equatable {

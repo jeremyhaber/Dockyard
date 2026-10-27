@@ -228,13 +228,14 @@ public actor TransferQueue {
     @discardableResult
     public func enqueue(
         items: [RemoteItem], from source: TransferEndpoint, to destination: TransferEndpoint,
-        into destinationDirectory: String, move: Bool = false
+        into destinationDirectory: String, move: Bool = false, conflict: ConflictPolicy? = nil
     ) -> [UUID] {
         enqueue(items.map { item in
             TransferRequest(
                 source: source, sourcePath: item.path, destination: destination,
                 destinationPath: RemotePath.join(destinationDirectory, item.name),
-                isDirectory: item.isDirectory, size: item.size, modified: item.modified, deleteSourceAfter: move)
+                isDirectory: item.isDirectory, size: item.size, modified: item.modified, deleteSourceAfter: move,
+                conflictOverride: conflict)
         })
     }
 

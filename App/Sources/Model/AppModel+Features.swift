@@ -58,6 +58,11 @@ extension AppModel {
 extension AppModel {
     /// Pushes the Settings window's values to the running transfer queue and the WHM timer.
     func applySettings() {
+        let filters = AppSettings.globalFilterPatterns.joined(separator: "\n")
+        if filters != transferUI.appliedFilters {
+            transferUI.appliedFilters = filters
+            for session in sessions { registerTransferSite(session.connection) }
+        }
         let policy = AppSettings.conflictPolicy
         let queue = self.queue
         Task { await queue.setConflictPolicy(policy) }

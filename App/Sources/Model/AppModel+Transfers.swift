@@ -33,6 +33,7 @@ enum TransferTab: String, CaseIterable, Identifiable {
 final class TransferCenter {
     var tab: TransferTab = .active
     @ObservationIgnored var lastFailed: Int?
+    @ObservationIgnored var appliedFilters: String?
 }
 
 extension AppModel {
@@ -97,7 +98,7 @@ extension AppModel {
             await queue.resume()
         case .clear:
             await queue.cancelAll()
-            await queue.removeFinished()
+            await queue.removeFinished(includingCancelled: true)
             await queue.removeFailed()
         }
     }
