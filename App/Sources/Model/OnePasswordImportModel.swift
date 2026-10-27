@@ -142,27 +142,27 @@ final class OnePasswordImportModel {
     ) async throws -> (items: [OnePasswordItem], warnings: [String]) {
         var results = [OnePasswordItem?](repeating: nil, count: summaries.count)
         var warnings: [String] = []
-        try await withThrowingTaskGroup(of: (Int, OnePasswordItem?, String?).self) { group in
-            var next = 0
-            func enqueue() {
-                guard next < summaries.count else { return }
-                let index = next, summary = summaries[next]
-                next += 1
-                group.addTask {
-                    do {
-                        return (index, try await cli.item(id: summary.id, inVault: summary.vault), nil)
-                    } catch let failure as OnePasswordError where !failure.needsUserAction {
-                        return (index, nil, "Could not read \"\(summary.title)\": \(failure)")
+        for start in stride(from: 0, to: summaries.count, by: 4) {
+            let batch = Array(summaries.enumerated())[start..<min(start + 4, summaries.count)]
+            let outcomes = try await withThrowingTaskGroup(of: (Int, OnePasswordItem?, String?).self) { group in
+                for (index, summary) in batch {
+                    group.addTask {
+                        do {
+                            return (index, try await cli.item(id: summary.id, inVault: summary.vault), nil)
+                        } catch let failure as OnePasswordError where !failure.needsUserAction {
+                            return (index, nil, "Could not read \"\(summary.title)\": \(failure)")
+                        }
                     }
                 }
+                var collected: [(Int, OnePasswordItem?, String?)] = []
+                for try await outcome in group { collected.append(outcome) }
+                return collected
             }
-            for _ in 0..<4 { enqueue() }
-            while let (index, item, warning) = try await group.next() {
+            for (index, item, warning) in outcomes {
                 results[index] = item
                 if let warning { warnings.append(warning) }
-                progress += 1
-                enqueue()
             }
+            progress += batch.count
         }
         return (results.compactMap { $0 }, warnings)
     }

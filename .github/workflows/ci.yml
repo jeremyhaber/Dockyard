@@ -131,6 +131,7 @@ jobs:
         if: failure()
         run: |
           tail -n 25 "$RUNNER_TEMP/xcodebuild.log" | cut -c1-300 | while IFS= read -r line; do echo "::warning::$line"; done
+          grep -A14 -m1 "Stack dump" "$RUNNER_TEMP/xcodebuild.log" | grep -v "Program arguments" | cut -c1-300 | while IFS= read -r line; do echo "::error::$line"; done
           grep -B45 -m1 "Command SwiftCompile failed" "$RUNNER_TEMP/xcodebuild.log" | grep -v "^ *\(cd\|/Applications\|builtin\|export\|env\)" | cut -c1-300 | while IFS= read -r line; do echo "::error::$line"; done
           grep -nE "BUILD FAILED|error: |Command .* failed" "$RUNNER_TEMP/xcodebuild.log" | tail -n 30 | cut -c1-300 | while IFS= read -r line; do echo "::error::$line"; done
           true
