@@ -169,7 +169,12 @@ struct SiteEditorSheet: View {
                 TextField("Local folder", text: $draft.localFolder, prompt: Text("Default: your home folder"))
                 Button("Choose\u{2026}") { chooseLocalFolder() }
             }
-            // TODO: "Max connections" (1-10) and "Delay between new connections (ms)" once Connection has those fields.
+            Stepper(value: $draft.maxConnections, in: Connection.maxConnectionsRange) {
+                LabeledContent("Max connections", value: "\(draft.maxConnections)")
+            }
+            Stepper(value: $draft.connectDelayMs, in: 0...10_000, step: 100) {
+                LabeledContent("Delay between new connections", value: "\(draft.connectDelayMs) ms")
+            }
             Toggle("On connect: restore last session", isOn: $draft.restoreSession)
             Toggle("Favorite", isOn: $draft.favorite)
             TextField("Tags", text: $draft.tags, prompt: Text("Comma separated"))

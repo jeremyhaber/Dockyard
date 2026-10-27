@@ -433,9 +433,10 @@ final class FileTableCoordinator: NSObject, NSTableViewDataSource, NSTableViewDe
         add("Delete…", #selector(menuDelete), enabled: hasSelection)
         add("New Folder…", #selector(menuNewFolder))
         menu.addItem(.separator())
-        // Archive actions arrive with the archive module.
-        add("Compress\u{2026} (coming soon)", #selector(menuRefresh), enabled: false)
-        add("Extract (coming soon)", #selector(menuRefresh), enabled: false)
+        let canExtract = items.count == 1 && !items[0].isDirectory && ArchiveFormat.detect(fileName: items[0].name) != nil
+        add("Compress\u{2026}", #selector(menuCompress), enabled: hasSelection)
+        add("Extract Here", #selector(menuExtractHere), enabled: canExtract)
+        add("Extract to\u{2026}", #selector(menuExtractTo), enabled: canExtract)
         menu.addItem(.separator())
         add("Copy Path", #selector(menuCopyPath), enabled: hasSelection)
         if pane.side == .server { add("Permissions…", #selector(menuChmod), enabled: hasSelection) }
@@ -457,6 +458,28 @@ final class FileTableCoordinator: NSObject, NSTableViewDataSource, NSTableViewDe
             guard let local = session.local else { return }
             app.transfer(items, from: session, .server, to: session, .local, directory: local.currentPath, move: false)
         }
+    }
+
+    @objc private func menuCompress() {
+        app.archives.compress(pane.selectedItems, in: session, side: pane.side, app: app)
+    }
+
+    @objc private func menuExtractHere() {
+        guard let item = pane.selectedItems.first else { return }
+        app.archives.extract(item, in: session, side: pane.side, to: nil, app: app)
+    }
+
+    @objc private func menuExtractTo() {
+        guard let item = pane.selectedItems.first else { return }
+        let destination: String?
+        if pane.side == .local {
+            destination = Dialogs.chooseFile(directory: URL(fileURLWithPath: pane.currentPath), canChooseDirectories: true)?.path
+        } else {
+            destination = Dialogs.promptText(
+                title: "Extract to", message: "Folder on \(session.connection.name)", initial: pane.currentPath, confirm: "Extract")
+        }
+        guard let destination, !destination.isEmpty else { return }
+        app.archives.extract(item, in: session, side: pane.side, to: destination, app: app)
     }
 
     @objc private func menuRename() {

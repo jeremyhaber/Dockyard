@@ -62,6 +62,7 @@ final class AppModel {
     let queue: TransferQueue
     let prompts: PromptCenter
     let edits = EditCenter()
+    let archives = ArchiveCenter()
     let mounts = MountService()
     private(set) var startupError: String?
 
