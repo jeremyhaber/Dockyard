@@ -1,0 +1,15 @@
+{
+   "data" : {
+      "cp_security_token" : "/cpsess7041934281",
+      "expires" : 1761576060,
+      "service" : "cpaneld",
+      "session" : "acmeshop:Fd2kQ0pYb8nL3vXz:3a9c5e1b7d2f4a68",
+      "url" : "https://whm.example.com:2083/cpsess7041934281/login/?session=acmeshop%3aFd2kQ0pYb8nL3vXz%2c3a9c5e1b7d2f4a68"
+   },
+   "metadata" : {
+      "command" : "create_user_session",
+      "reason" : "OK",
+      "result" : 1,
+      "version" : 1
+   }
+}
