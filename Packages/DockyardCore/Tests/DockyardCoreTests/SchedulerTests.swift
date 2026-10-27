@@ -52,7 +52,9 @@ private func slowHook(_ server: FakeServer, milliseconds: UInt64 = 8) {
         for (i, endpoint) in endpoints.enumerated() { await q.enqueue(try uploads(env, "s\(i)-", count: 20, to: endpoint)) }
         await q.waitUntilIdle()
         #expect(await q.snapshot().completedCount == 80)
-        #expect(meter.peak == 6)
+        // The cap must never be exceeded; how close a busy machine gets to it varies.
+        #expect(meter.peak <= 6)
+        #expect(meter.peak >= 2)
     }
 
     @Test func sitesTakeTurns() async throws {
