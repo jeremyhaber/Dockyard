@@ -131,5 +131,5 @@ jobs:
         if: failure()
         run: |
           tail -n 25 "$RUNNER_TEMP/xcodebuild.log" | cut -c1-300 | while IFS= read -r line; do echo "::warning::$line"; done
-          grep -nE "BUILD FAILED|failed with|Command .* failed|fatal|Error:|error" "$RUNNER_TEMP/xcodebuild.log" | tail -n 15 | cut -c1-300 | while IFS= read -r line; do echo "::error::$line"; done
+          grep -nE "BUILD FAILED|error: |Command .* failed" "$RUNNER_TEMP/xcodebuild.log" | tail -n 30 | cut -c1-300 | while IFS= read -r line; do echo "::error::$line"; done
           true
