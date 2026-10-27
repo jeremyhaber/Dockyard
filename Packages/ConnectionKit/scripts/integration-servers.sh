@@ -24,7 +24,12 @@ SSH_IMAGE=dockyard-test-sshd:latest
 FTP_IMAGE=stilliard/pure-ftpd:latest
 VSFTPD_IMAGE=fauria/vsftpd:latest
 
-containers=(dockyard-test-sftp dockyard-test-ftp dockyard-test-vsftpd)
+# Jump host topology: the host reaches only dockyard-test-sftp. inner-sshd lives on an internal network shared
+# with it, and deep-sshd on a second internal network shared only with inner-sshd. Neither publishes a port.
+NET_INNER=dockyard-test-inner1
+NET_DEEP=dockyard-test-inner2
+
+containers=(dockyard-test-sftp dockyard-test-ftp dockyard-test-vsftpd dockyard-test-inner dockyard-test-deep)
 
 up() {
   docker build --network host -q -t "$SSH_IMAGE" -f "$PKG_DIR/scripts/Dockerfile.sshd" "$PKG_DIR/scripts" >/dev/null
@@ -60,6 +65,13 @@ up() {
     -p "127.0.0.1:$SSH_PORT:2222" -p "127.0.0.1:$SSH_BOTH_PORT:2223" -p "127.0.0.1:$SSH_KBD_PORT:2224" \
     "$SSH_IMAGE" >/dev/null
 
+  docker network create --internal "$NET_INNER" >/dev/null
+  docker network create --internal "$NET_DEEP" >/dev/null
+  docker network connect "$NET_INNER" dockyard-test-sftp
+  docker run -d --name dockyard-test-inner -e PUBLIC_KEY="$pubkeys" --network "$NET_INNER" --network-alias inner-sshd "$SSH_IMAGE" >/dev/null
+  docker network connect --alias inner-sshd "$NET_DEEP" dockyard-test-inner
+  docker run -d --name dockyard-test-deep -e PUBLIC_KEY="$pubkeys" --network "$NET_DEEP" --network-alias deep-sshd "$SSH_IMAGE" >/dev/null
+
   docker run -d --name dockyard-test-ftp -p "127.0.0.1:$FTP_PORT:21" -p 127.0.0.1:30000-30009:30000-30009 \
     -e PUBLICHOST=127.0.0.1 -e FTP_USER_NAME="$USER_NAME" -e FTP_USER_PASS="$USER_PASS" \
     -e FTP_USER_HOME=/home/dockyard -e FTP_PASSIVE_PORTS=30000:30009 \
@@ -77,6 +89,8 @@ up() {
   nohup python3 "$PKG_DIR/scripts/latency-proxy.py" "$SSH_SLOW_PORT" "$SSH_PORT" 20 >/dev/null 2>&1 &
   echo $! > "$STATE_DIR/latency-proxy.pid"
   wait_for_port "$SSH_SLOW_PORT" "latency proxy"
+  wait_for_container_ssh dockyard-test-inner
+  wait_for_container_ssh dockyard-test-deep
   wait_for_port "$FTP_PORT" FTP
   wait_for_port "$FTP_LIST_PORT" vsftpd
   echo "Servers are up. Run: DOCKYARD_INTEGRATION=1 swift test"
@@ -91,9 +105,19 @@ wait_for_port() {
   return 1
 }
 
+wait_for_container_ssh() {
+  for _ in $(seq 1 60); do
+    docker exec "$1" bash -c 'exec 3<>/dev/tcp/127.0.0.1/2222' 2>/dev/null && return 0
+    sleep 1
+  done
+  echo "Timed out waiting for sshd in $1" >&2
+  return 1
+}
+
 down() {
   if [ -f "$STATE_DIR/latency-proxy.pid" ]; then kill "$(cat "$STATE_DIR/latency-proxy.pid")" 2>/dev/null || true; rm -f "$STATE_DIR/latency-proxy.pid"; fi
   docker rm -f "${containers[@]}" >/dev/null 2>&1 || true
+  docker network rm "$NET_INNER" "$NET_DEEP" >/dev/null 2>&1 || true
   echo "Servers stopped."
 }
 

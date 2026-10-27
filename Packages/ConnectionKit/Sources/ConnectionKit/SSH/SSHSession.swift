@@ -18,6 +18,9 @@ public final class SSHSession: @unchecked Sendable {
     // Everything below is confined to `queue`.
     var handle: OpaquePointer?
     private var socketFD: Int32 = -1
+    /// The session this one is tunnelled through (jump host). Closed together with this session.
+    private var upstream: SSHSession?
+    private var relay: TunnelRelay?
     private var channels: [ObjectIdentifier: SSHChannel] = [:]
     private var shells: [ObjectIdentifier: ShellChannel] = [:]
     private var pumpScheduled = false
@@ -40,9 +43,12 @@ public final class SSHSession: @unchecked Sendable {
 
     /// Opens the TCP connection, performs the SSH handshake and asks `validator` about the host key.
     /// Nothing secret has been sent when the validator runs.
+    /// With `via`, the connection runs through a direct-tcpip channel of that (already authenticated)
+    /// session. The new session then owns `via` and closes it when it closes; on failure `via` stays open.
     public static func connect(
         host: String,
         port: Int,
+        via upstream: SSHSession? = nil,
         options: SSHSessionOptions = SSHSessionOptions(),
         validator: SSHHostKeyValidator = .acceptAnything(),
         log: @escaping @Sendable (LogLine.Kind, String) -> Void = { _, _ in }
@@ -51,13 +57,23 @@ public final class SSHSession: @unchecked Sendable {
         let session = SSHSession(options: options, log: log)
         let hostKey: SSHHostKey
         do {
-            hostKey = try await session.perform(requireAlive: false) { try $0.establish(host: host, port: port) }
+            if let upstream {
+                let tunnel = try await upstream.openTunnel(to: host, port: port)
+                session.adopt(tunnel, upstream: upstream)
+                hostKey = try await session.perform(requireAlive: false) { try $0.establish(socket: tunnel.descriptor) }
+            } else {
+                hostKey = try await session.perform(requireAlive: false) {
+                    try $0.establish(socket: try tcpConnect(host: host, port: port, timeout: options.connectTimeout))
+                }
+            }
         } catch {
+            session.upstream = nil
             await session.close()
             throw error
         }
         log(.status, "Host key \(hostKey.algorithm) \(hostKey.fingerprint)")
         guard await validator.validate(hostKey) else {
+            session.upstream = nil
             await session.close()
             throw RemoteError.hostKeyRejected(hostKey.fingerprint)
         }
@@ -74,8 +90,8 @@ public final class SSHSession: @unchecked Sendable {
         }
     }
 
-    private func establish(host: String, port: Int) throws -> SSHHostKey {
-        socketFD = try tcpConnect(host: host, port: port, timeout: options.connectTimeout)
+    private func establish(socket: Int32) throws -> SSHHostKey {
+        socketFD = socket
         guard let session = libssh2_session_init_ex(nil, nil, nil, nil) else {
             throw RemoteError.protocolError("Cannot create SSH session")
         }
@@ -244,6 +260,45 @@ public final class SSHSession: @unchecked Sendable {
         }
     }
 
+    func newDirectTCPIPChannel(host: String, port: Int) throws -> SSHChannel {
+        guard let handle else { throw RemoteError.notConnected }
+        let deadline = deadline(options.operationTimeout)
+        while true {
+            if let raw = libssh2_channel_direct_tcpip_ex(handle, host, Int32(port), "127.0.0.1", 0) {
+                let channel = SSHChannel(session: self, handle: raw)
+                channels[ObjectIdentifier(channel)] = channel
+                return channel
+            }
+            let code = libssh2_session_last_errno(handle)
+            if code == LIBSSH2_ERROR_EAGAIN { try waitForSocket(until: deadline, what: "open tunnel"); continue }
+            throw failure("open tunnel to \(host):\(port)", code)
+        }
+    }
+
+    /// Opens a direct-tcpip channel to `host:port` as seen from this session's server and bridges it
+    /// to a local socket that another libssh2 session can use as its transport.
+    func openTunnel(to host: String, port: Int) async throws -> TunnelEndpoint {
+        let channel = try await perform { try $0.newDirectTCPIPChannel(host: host, port: port) }
+        do {
+            let (inner, outer) = try makeSocketPair()
+            let relay = TunnelRelay(session: self, channel: channel, descriptor: outer)
+            relay.start()
+            return TunnelEndpoint(descriptor: inner, relay: relay)
+        } catch {
+            try? await perform { _ in channel.close() }
+            throw error
+        }
+    }
+
+    func adopt(_ tunnel: TunnelEndpoint, upstream: SSHSession) {
+        self.upstream = upstream
+        self.relay = tunnel.relay
+        queue.sync { socketFD = tunnel.descriptor }
+    }
+
+    /// The socket libssh2 polls; constant after the handshake began.
+    var transportDescriptor: Int32 { socketFD }
+
     func release(_ channel: SSHChannel) {
         channels.removeValue(forKey: ObjectIdentifier(channel))
         shells.removeValue(forKey: ObjectIdentifier(channel))
@@ -272,6 +327,40 @@ public final class SSHSession: @unchecked Sendable {
             try? await perform { _ in channel.close() }
             throw error
         }
+    }
+
+    /// Runs a command and streams its output. Cancelling the consuming task (or dropping the stream)
+    /// closes the channel; the remote process is only signalled if it writes afterwards, so callers that
+    /// must stop it promptly kill it by pid (see `RemoteSearch`).
+    public func execStream(_ command: String) async throws -> AsyncThrowingStream<SSHExecEvent, Error> {
+        let channel = try await perform { session in
+            let channel = try session.newChannel()
+            try channel.exec(command)
+            return channel
+        }
+        let (stream, continuation) = AsyncThrowingStream<SSHExecEvent, Error>.makeStream()
+        let task = Task { [self] in
+            do {
+                while !Task.isCancelled {
+                    let chunk = try await perform { _ in try channel.readSome(wait: 0.1) }
+                    if !chunk.stdout.isEmpty { continuation.yield(.stdout(chunk.stdout)) }
+                    if !chunk.stderr.isEmpty { continuation.yield(.stderr(chunk.stderr)) }
+                    if chunk.isEOF {
+                        let status = try await perform { _ in try channel.closeAndExitStatus() }
+                        continuation.yield(.exit(status))
+                        continuation.finish()
+                        return
+                    }
+                }
+                try? await perform { _ in channel.close() }
+                continuation.finish()
+            } catch {
+                try? await perform { _ in channel.close() }
+                continuation.finish(throwing: error)
+            }
+        }
+        continuation.onTermination = { _ in task.cancel() }
+        return stream
     }
 
     /// Opens an interactive PTY shell on this connection. With `elevation`, `su -` or `sudo -i` is typed
@@ -335,6 +424,11 @@ public final class SSHSession: @unchecked Sendable {
                 continuation.resume()
             }
         }
+        relay?.stop()
+        relay = nil
+        let parent = upstream
+        upstream = nil
+        await parent?.close()
     }
 
     private func shutdown() {
