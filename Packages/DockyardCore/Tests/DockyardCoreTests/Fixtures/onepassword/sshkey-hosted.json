@@ -1,0 +1,34 @@
+{
+  "id": "z0y9x8w7v6u5t4s3r2q1p0o9n8",
+  "title": "Hetzner box key",
+  "version": 1,
+  "vault": {
+    "id": "bq3d6fz7yzvsr5lk4rpxu2h6im",
+    "name": "Infrastructure"
+  },
+  "category": "SSH_KEY",
+  "tags": [],
+  "urls": [
+    {
+      "label": "website",
+      "primary": true,
+      "href": "ssh://root@box.hetzner.example"
+    }
+  ],
+  "fields": [
+    {
+      "id": "private_key",
+      "type": "SSHKEY",
+      "label": "private key",
+      "value": "-----BEGIN PRIVATE KEY-----\nFAKE\n-----END PRIVATE KEY-----\n",
+      "reference": "op://Infrastructure/Hetzner box key/private key"
+    },
+    {
+      "id": "public_key",
+      "type": "STRING",
+      "label": "public key",
+      "value": "ssh-ed25519 AAAAFAKE",
+      "reference": "op://Infrastructure/Hetzner box key/public key"
+    }
+  ]
+}

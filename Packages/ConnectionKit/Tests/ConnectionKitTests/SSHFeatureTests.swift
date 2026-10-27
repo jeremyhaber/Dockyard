@@ -124,6 +124,23 @@ private func elevatedStore(_ config: ConnectionConfig, elevationPassword: String
         #expect(lines.contains { $0.contains("Authenticated with ssh-agent") })
     }
 
+    @Test func customAgentSocketIgnoresSSHAuthSock() async throws {
+        let agent = try TestSSHAgent.start(export: false)
+        defer { agent.stop() }
+        try agent.add(Env.key("id_ed25519"))
+        setenv("SSH_AUTH_SOCK", "/nonexistent/agent.sock", 1)
+
+        var config = sftpConfig(auth: .agent)
+        config.agentSocket = .custom(agent.socket)
+        let lines = try await connectAndList(config, secrets: await store(password: nil, for: config))
+        #expect(lines.contains { $0.contains("Authenticated with ssh-agent") })
+
+        config.agentSocket = .system
+        await #expect(throws: RemoteError.self) {
+            _ = try await connectAndList(config, secrets: await store(password: nil, for: config))
+        }
+    }
+
     @Test func execChannel() async throws {
         let config = sftpConfig(auth: .password)
         let fs = SFTPFileSystem(config: config, secrets: await store(for: config))
@@ -266,11 +283,12 @@ private struct TestSSHAgent {
     let pid: pid_t
     let socket: String
 
-    static func start() throws -> TestSSHAgent {
+    /// With `export` false the process environment is left alone, so only an explicit socket path can reach the agent.
+    static func start(export: Bool = true) throws -> TestSSHAgent {
         let socket = FileManager.default.temporaryDirectory.appendingPathComponent("agent-\(UUID().uuidString.prefix(8)).sock").path
         let pid = try spawn("/usr/bin/ssh-agent", ["-D", "-a", socket], environment: [:])
         for _ in 0..<100 where !FileManager.default.fileExists(atPath: socket) { Thread.sleep(forTimeInterval: 0.05) }
-        setenv("SSH_AUTH_SOCK", socket, 1)
+        if export { setenv("SSH_AUTH_SOCK", socket, 1) }
         return TestSSHAgent(pid: pid, socket: socket)
     }
 

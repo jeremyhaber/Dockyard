@@ -33,13 +33,15 @@ public typealias SSHPromptResponder = @Sendable (_ prompt: String, _ echo: Bool)
 /// requires `publickey,password` is satisfied by `[.publicKey, .password]`.
 public enum SSHAuthStep: Sendable, CustomStringConvertible {
     case agent
+    /// An ssh-agent listening on this Unix socket instead of `SSH_AUTH_SOCK`.
+    case agentSocket(String)
     case publicKey(privateKey: String, passphrase: String?)
     case password(String)
     case keyboardInteractive(SSHPromptResponder)
 
     public var description: String {
         switch self {
-        case .agent: "ssh-agent"
+        case .agent, .agentSocket: "ssh-agent"
         case .publicKey: "public key"
         case .password: "password"
         case .keyboardInteractive: "keyboard-interactive"
