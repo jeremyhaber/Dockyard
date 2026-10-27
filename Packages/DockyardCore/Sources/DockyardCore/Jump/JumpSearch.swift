@@ -5,8 +5,12 @@ public struct JumpFolder: Sendable, Hashable {
     public var connectionId: UUID
     public var path: String
     public var visitedAt: Date
-    public init(connectionId: UUID, path: String, visitedAt: Date) {
+    /// A folder pinned on its connection. `visitedAt` is then meaningless.
+    public var isPinned: Bool
+    public var label: String?
+    public init(connectionId: UUID, path: String, visitedAt: Date, isPinned: Bool = false, label: String? = nil) {
         self.connectionId = connectionId; self.path = path; self.visitedAt = visitedAt
+        self.isPinned = isPinned; self.label = label
     }
 }
 
@@ -56,15 +60,26 @@ public enum JumpSearch {
         }
 
         if !tokens.isEmpty {
-            for f in folders {
+            // Pinned folders come from the connections themselves and win over a recent visit to the same folder.
+            let pinned = connections.flatMap { c in
+                c.pinnedFolders.map { JumpFolder(connectionId: c.id, path: $0.path, visitedAt: .distantPast, isPinned: true, label: $0.label) }
+            }
+            let pinnedKeys = Set(pinned.map { "\($0.connectionId)|\($0.path)" })
+            let candidates = pinned + folders.filter { !pinnedKeys.contains("\($0.connectionId)|\($0.path)") }
+            for f in candidates {
                 guard let c = byId[f.connectionId] else { continue }
                 var fields = connectionFields(c, client: c.clientFolderId.flatMap { clientNames[$0] }).map { ($0.0, $0.1 * 0.5) }
                 fields.append((f.path.lowercased(), 0.6))
                 fields.append((RemotePath.lastComponent(of: f.path).lowercased(), 1.0))
+                if let label = f.label { fields.append((label.lowercased(), 1.0)) }
                 guard let base = score(tokens: tokens, fields: fields) else { continue }
-                // Folders sit below an equally good connection, newer visits slightly higher.
-                let age = max(0, now.timeIntervalSince(f.visitedAt)) / 86_400
-                hits.append(JumpHit(target: .folder(f, in: c), score: base - 5 + max(0, 5 - age * 0.5)))
+                // Folders sit below an equally good connection; pins above recents, newer visits slightly higher.
+                if f.isPinned {
+                    hits.append(JumpHit(target: .folder(f, in: c), score: base - 5 + 6))
+                } else {
+                    let age = max(0, now.timeIntervalSince(f.visitedAt)) / 86_400
+                    hits.append(JumpHit(target: .folder(f, in: c), score: base - 5 + max(0, 5 - age * 0.5)))
+                }
             }
         }
 
