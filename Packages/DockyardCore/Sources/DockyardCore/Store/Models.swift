@@ -37,6 +37,27 @@ public enum UserEditableField: String, Sendable, Hashable, Codable, CaseIterable
     case name, notes, host, port
 }
 
+/// Backend settings for `rclone` connections. Mirrors `RcloneRemoteSpec` with plain strings so this module
+/// does not depend on RcloneKit. Secrets are never stored here.
+public struct CloudSpec: Sendable, Hashable, Codable {
+    /// rclone backend name: `s3`, `b2`, `drive`, `dropbox`, `onedrive`.
+    public var backend: String
+    public var options: [String: String]
+    /// Path inside the remote the connection is rooted at, e.g. `my-bucket/site`. Empty shows every bucket.
+    public var root: String
+
+    public init(backend: String, options: [String: String] = [:], root: String = "") {
+        self.backend = backend
+        self.options = options
+        self.root = root
+    }
+
+    /// True when the top level lists buckets, so each bucket's top is a root for the `..` rule.
+    public var listsBuckets: Bool {
+        (backend == "s3" || backend == "b2") && root.trimmingCharacters(in: CharacterSet(charactersIn: "/")).isEmpty
+    }
+}
+
 public struct Connection: Sendable, Hashable, Identifiable {
     public var id: UUID
     public var name: String
@@ -69,6 +90,10 @@ public struct Connection: Sendable, Hashable, Identifiable {
     public var userEditedFields: Set<UserEditableField>
     /// Initial remote folder, if the user set one (e.g. from a pasted URL).
     public var initialRemotePath: String?
+    /// Default local folder when there is no session to restore.
+    public var localFolder: String?
+    /// Set for `rclone` connections.
+    public var cloud: CloudSpec?
 
     public init(
         id: UUID = UUID(),
@@ -97,7 +122,9 @@ public struct Connection: Sendable, Hashable, Identifiable {
         removedFromSource: Bool = false,
         isNew: Bool = false,
         userEditedFields: Set<UserEditableField> = [],
-        initialRemotePath: String? = nil
+        initialRemotePath: String? = nil,
+        localFolder: String? = nil,
+        cloud: CloudSpec? = nil
     ) {
         self.id = id
         self.name = name
@@ -126,6 +153,8 @@ public struct Connection: Sendable, Hashable, Identifiable {
         self.isNew = isNew
         self.userEditedFields = userEditedFields
         self.initialRemotePath = initialRemotePath
+        self.localFolder = localFolder
+        self.cloud = cloud
     }
 
     /// The `ConnectionKit` view of this connection.
@@ -191,8 +220,19 @@ extension Connection: FetchableRecord, PersistableRecord, TableRecord {
             isNew: row["isNew"],
             userEditedFields: Set(((try? JSONDecoder().decode([String].self, from: Data(editedJSON.utf8))) ?? [])
                 .compactMap(UserEditableField.init(rawValue:))),
-            initialRemotePath: row["initialRemotePath"]
+            initialRemotePath: row["initialRemotePath"],
+            localFolder: row["localFolder"],
+            cloud: Self.decodeCloud(row)
         )
+    }
+
+    private static func decodeCloud(_ row: Row) -> CloudSpec? {
+        let backend: String? = row["cloudBackend"]
+        guard let backend, !backend.isEmpty else { return nil }
+        let optionsJSON: String = row["cloudOptions"] ?? "{}"
+        let options = (try? JSONDecoder().decode([String: String].self, from: Data(optionsJSON.utf8))) ?? [:]
+        let root: String = row["cloudRoot"] ?? ""
+        return CloudSpec(backend: backend, options: options, root: root)
     }
 
     public func encode(to container: inout PersistenceContainer) throws {
@@ -224,6 +264,10 @@ extension Connection: FetchableRecord, PersistableRecord, TableRecord {
         container["userEditedFields"] = String(
             decoding: try JSONEncoder().encode(userEditedFields.map(\.rawValue).sorted()), as: UTF8.self)
         container["initialRemotePath"] = initialRemotePath
+        container["localFolder"] = localFolder
+        container["cloudBackend"] = cloud?.backend
+        container["cloudOptions"] = try cloud.map { String(decoding: try JSONEncoder().encode($0.options), as: UTF8.self) }
+        container["cloudRoot"] = cloud?.root
     }
 }
 
