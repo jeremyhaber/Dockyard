@@ -131,6 +131,7 @@ private func plan(_ events: [WatchEvent], mirror: Bool = false, filters: [String
 }
 
 @Suite struct WatchCoordinatorTests {
+    // A pending batch arms two timers (max delay and quiet period); wait for both before advancing the clock.
     func makeCoordinator(mirror: Bool = false) -> (WatchCoordinator, ManualClock) {
         let clock = ManualClock()
         return (WatchCoordinator(link: link(mirror: mirror), clock: clock, debounce: 0.5, maxDelay: 5), clock)
@@ -139,7 +140,7 @@ private func plan(_ events: [WatchEvent], mirror: Bool = false, filters: [String
     @Test func burstBecomesOnePlan() async throws {
         let (c, clock) = makeCoordinator()
         for i in 0..<20 { await c.ingest(e("file\(i % 3).txt")) }
-        await waitUntil { clock.sleeperCount >= 1 }
+        await waitUntil { clock.sleeperCount >= 2 }
         clock.advance(by: 0.6)
         let plans = await firstValues(c.plans, count: 1)
         #expect(plans.count == 1 && plans[0].items.count == 3)
@@ -149,7 +150,7 @@ private func plan(_ events: [WatchEvent], mirror: Bool = false, filters: [String
     @Test func eachEventRestartsTheQuietPeriod() async throws {
         let (c, clock) = makeCoordinator()
         await c.ingest(e("a.txt"))
-        await waitUntil { clock.sleeperCount >= 1 }
+        await waitUntil { clock.sleeperCount >= 2 }
         clock.advance(by: 0.4)
         await c.ingest(e("b.txt"))
         await waitUntil { clock.sleeperCount >= 2 }
@@ -165,7 +166,7 @@ private func plan(_ events: [WatchEvent], mirror: Bool = false, filters: [String
         let (c, clock) = makeCoordinator()
         for step in 0..<14 {
             await c.ingest(e("busy\(step).txt"))
-            await waitUntil { clock.sleeperCount >= 1 }
+            await waitUntil { clock.sleeperCount >= 2 }
             clock.advance(by: 0.4)
             try await Task.sleep(for: .milliseconds(5))
         }
@@ -182,7 +183,7 @@ private func plan(_ events: [WatchEvent], mirror: Bool = false, filters: [String
         #expect(await c.resume() == true)
         #expect(await c.resume() == false)
         await c.ingest(e("b.txt"))
-        await waitUntil { clock.sleeperCount >= 1 }
+        await waitUntil { clock.sleeperCount >= 2 }
         clock.advance(by: 1)
         let plans = await firstValues(c.plans, count: 1)
         #expect(plans.first?.items == [.upload(local: "\(root)/b.txt", remote: "/var/www/html/b.txt")])
@@ -200,7 +201,7 @@ private func plan(_ events: [WatchEvent], mirror: Bool = false, filters: [String
     @Test func emptyPlansAreNotPublished() async throws {
         let (c, clock) = makeCoordinator()
         await c.ingest(e("only-modified-dir", .modified, dir: true))
-        await waitUntil { clock.sleeperCount >= 1 }
+        await waitUntil { clock.sleeperCount >= 2 }
         clock.advance(by: 1)
         await c.ingest(e("real.txt"))
         // A cancelled timer from the first batch may still be registered, so keep advancing until the batch is flushed.
@@ -229,7 +230,7 @@ private func plan(_ events: [WatchEvent], mirror: Bool = false, filters: [String
         feed.yield(e("b.txt"))
         feed.finish()
         await task.value
-        await waitUntil { clock.sleeperCount >= 1 }
+        await waitUntil { clock.sleeperCount >= 2 }
         clock.advance(by: 1)
         let plans = await firstValues(c.plans, count: 1)
         #expect(plans.first?.items.count == 2)
@@ -239,7 +240,7 @@ private func plan(_ events: [WatchEvent], mirror: Bool = false, filters: [String
         let (c, clock) = makeCoordinator()
         await c.setMirrorDeletes(true)
         await c.ingest(e("gone.txt", .deleted))
-        await waitUntil { clock.sleeperCount >= 1 }
+        await waitUntil { clock.sleeperCount >= 2 }
         clock.advance(by: 1)
         let plans = await firstValues(c.plans, count: 1)
         #expect(plans.first?.items == [.delete(remote: "/var/www/html/gone.txt", isDirectory: false)])
