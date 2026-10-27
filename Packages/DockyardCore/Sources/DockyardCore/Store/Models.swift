@@ -137,6 +137,8 @@ public struct Connection: Sendable, Hashable, Identifiable {
     public var secretReferences: [SecretPurpose: String]
     /// The 1Password item this connection was imported from; re-import matches on it.
     public var onePasswordItemId: String?
+    /// Set when the connection was removed. Removed rows are hidden everywhere and purged after 30 days.
+    public var deletedAt: Date?
 
     /// Most simultaneous connections the transfer queue may open to this site (1...10).
     public var maxConnections: Int
@@ -188,7 +190,8 @@ public struct Connection: Sendable, Hashable, Identifiable {
         connectDelayMs: Int = 0,
         agentSocket: AgentSocket = .system,
         secretReferences: [SecretPurpose: String] = [:],
-        onePasswordItemId: String? = nil
+        onePasswordItemId: String? = nil,
+        deletedAt: Date? = nil
     ) {
         self.id = id
         self.name = name
@@ -232,6 +235,7 @@ public struct Connection: Sendable, Hashable, Identifiable {
         self.agentSocket = agentSocket
         self.secretReferences = secretReferences
         self.onePasswordItemId = onePasswordItemId
+        self.deletedAt = deletedAt
     }
 
     /// The `ConnectionKit` view of this connection.
@@ -312,7 +316,8 @@ extension Connection: FetchableRecord, PersistableRecord, TableRecord {
             connectDelayMs: row["connectDelayMs"],
             agentSocket: (row["agentSocket"] as String?).flatMap(AgentSocket.init(rawValue:)) ?? .system,
             secretReferences: Self.decodeReferences(row["secretReferences"]),
-            onePasswordItemId: row["onePasswordItemId"]
+            onePasswordItemId: row["onePasswordItemId"],
+            deletedAt: row["deletedAt"]
         )
     }
 
@@ -378,6 +383,7 @@ extension Connection: FetchableRecord, PersistableRecord, TableRecord {
             decoding: try JSONEncoder().encode(Dictionary(uniqueKeysWithValues: secretReferences.map { ($0.key.rawValue, $0.value) })),
             as: UTF8.self)
         container["onePasswordItemId"] = onePasswordItemId
+        container["deletedAt"] = deletedAt
     }
 
     private static func decodeJSON<T: Decodable>(_ text: String, default fallback: T) -> T {

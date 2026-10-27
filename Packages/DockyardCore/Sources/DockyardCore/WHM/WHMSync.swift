@@ -117,7 +117,7 @@ public struct WHMSyncService: Sendable {
             let client = WHMClient(host: source.host, port: source.apiPort, apiUser: source.apiUser, token: token,
                                    transport: transportFactory(source))
             let accounts = try await client.listAccounts()
-            let existing = try await repository.fetch(.source(.whm(source.id)))
+            let existing = try await repository.fetch(ConnectionFilter(scope: .source(.whm(source.id)), includeRemoved: true))
             let (changed, report) = WHMMerge.merge(accounts: accounts, source: source, existing: existing, now: clock.now())
             try await repository.save(changed)
             var updated = source

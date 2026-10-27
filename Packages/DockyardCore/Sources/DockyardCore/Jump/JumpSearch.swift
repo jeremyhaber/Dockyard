@@ -41,6 +41,7 @@ public enum JumpSearch {
         now: Date = Date(),
         limit: Int = 20
     ) -> [JumpHit] {
+        let connections = connections.filter { $0.deletedAt == nil }
         let tokens = query.lowercased().split(whereSeparator: \.isWhitespace).map(String.init)
         let byId = Dictionary(uniqueKeysWithValues: connections.map { ($0.id, $0) })
         var hits: [JumpHit] = []
