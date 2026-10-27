@@ -5,73 +5,14 @@ import SwiftUI
 /// The Transfers tab of the bottom drawer: Active, Queued, Failed and Done lists over the whole queue.
 struct TransfersView: View {
     @Environment(AppModel.self) private var app
-    @State private var folder: TransferJobInfo?
 
     var body: some View {
-        @Bindable var center = app.transferUI
+        let center = app.transferUI
         let snapshot = app.transfers
-        VStack(spacing: 0) {
-            HStack(spacing: 10) {
-                Picker("List", selection: $center.tab) {
-                    ForEach(TransferTab.allCases) { tab in
-                        Text("\(tab.rawValue) \(tab.count(in: snapshot).formatted())").tag(tab)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(width: 380)
-                .onChange(of: center.tab) { folder = nil }
-                if let folder {
-                    Button {
-                        self.folder = nil
-                    } label: {
-                        Label(folder.name, systemImage: "chevron.left")
-                    }
-                    .controlSize(.small)
-                    .accessibilityLabel("Back to all transfers, leaving \(folder.name)")
-                }
-                Spacer()
-                if let skips = skipSummary(snapshot) {
-                    Label(skips, systemImage: "line.3.horizontal.decrease")
-                        .font(.system(size: 11))
-                        .foregroundStyle(Palette.textSecondary)
-                        .lineLimit(1)
-                        .help("Existing files left alone by your rules, and items left out by transfer filters (.DS_Store, node_modules/ and your own)")
-                }
-                Button("Retry all failed") { app.retryFailedTransfers() }
-                    .disabled(snapshot.failedCount == 0)
-                if center.tab == .failed {
-                    Button("Clear failed") { app.clearFailedTransfers() }
-                        .disabled(snapshot.failedCount == 0)
-                } else {
-                    Button("Clear done") { app.clearFinishedTransfers() }
-                        .disabled(TransferTab.done.count(in: snapshot) == 0)
-                }
-                Button {
-                    app.setTransfersPaused(!snapshot.isPaused)
-                } label: {
-                    Label(snapshot.isPaused ? "Resume" : "Pause", systemImage: snapshot.isPaused ? "play.fill" : "pause.fill")
-                }
-                .disabled(snapshot.isIdle && !snapshot.isPaused)
-            }
-            .controlSize(.small)
-            .padding(.horizontal, 10)
-            .frame(height: 32)
-            Divider()
-            TransferTableView(
-                queue: app.queue, version: version(snapshot), tab: center.tab, folder: folder,
-                openFolder: { folder = $0 })
-                .overlay { if snapshot.isIdle && TransferTab.done.count(in: snapshot) + snapshot.failedCount == 0 { emptyHint } }
-        }
-    }
-
-    /// "312 skipped: unchanged \u{00B7} 4 skipped: kept existing \u{00B7} 9 skipped: filters"
-    private func skipSummary(_ s: TransferSnapshot) -> String? {
-        var parts = SkipReason.allCases.compactMap { reason in
-            s.skipReasons[reason].map { "\($0.formatted()) skipped: \(reason.title)" }
-        }
-        if s.filteredCount > 0 { parts.append("\(s.filteredCount.formatted()) skipped: filters") }
-        return parts.isEmpty ? nil : parts.joined(separator: " \u{00B7} ")
+        TransferTableView(
+            queue: app.queue, version: version(snapshot), tab: center.tab, folder: center.folder,
+            openFolder: { center.folder = $0 })
+            .overlay { if snapshot.isIdle && TransferTab.done.count(in: snapshot) + snapshot.failedCount == 0 { emptyHint } }
     }
 
     private var emptyHint: some View {
@@ -90,6 +31,88 @@ struct TransfersView: View {
         hasher.combine(s.skippedCount)
         hasher.combine(s.bytesDone / 131_072)
         return hasher.finalize()
+    }
+}
+
+/// The Transfers controls in the drawer's single header row: sub-tabs after the main tabs, actions on the right.
+struct TransfersHeader: View {
+    @Environment(AppModel.self) private var app
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            row(iconOnly: false)
+            row(iconOnly: true)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func row(iconOnly: Bool) -> some View {
+        @Bindable var center = app.transferUI
+        let snapshot = app.transfers
+        return HStack(spacing: 8) {
+            Picker("List", selection: $center.tab) {
+                ForEach(TransferTab.allCases) { tab in
+                    Text("\(tab.rawValue) \(tab.count(in: snapshot).formatted())").tag(tab)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(width: 340)
+            .onChange(of: center.tab) { center.folder = nil }
+            if let folder = center.folder {
+                Button {
+                    center.folder = nil
+                } label: {
+                    Label(folder.name, systemImage: "chevron.left")
+                }
+                .accessibilityLabel("Back to all transfers, leaving \(folder.name)")
+            }
+            Spacer(minLength: 0)
+            if !iconOnly, let skips = skipSummary(snapshot) {
+                Label(skips, systemImage: "line.3.horizontal.decrease")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Palette.textSecondary)
+                    .lineLimit(1)
+                    .help("Existing files left alone by your rules, and items left out by transfer filters (.DS_Store, node_modules/ and your own)")
+            }
+            Group {
+                Button { app.retryFailedTransfers() } label: {
+                    Label("Retry all failed", systemImage: "arrow.clockwise")
+                }
+                .disabled(snapshot.failedCount == 0)
+                .help("Retry all failed transfers")
+                if center.tab == .failed {
+                    Button { app.clearFailedTransfers() } label: {
+                        Label("Clear failed", systemImage: "xmark.circle")
+                    }
+                    .disabled(snapshot.failedCount == 0)
+                    .help("Remove failed transfers from the list")
+                } else {
+                    Button { app.clearFinishedTransfers() } label: {
+                        Label("Clear done", systemImage: "xmark.circle")
+                    }
+                    .disabled(TransferTab.done.count(in: snapshot) == 0)
+                    .help("Remove finished transfers from the list")
+                }
+                Button {
+                    app.setTransfersPaused(!snapshot.isPaused)
+                } label: {
+                    Label(snapshot.isPaused ? "Resume" : "Pause", systemImage: snapshot.isPaused ? "play.fill" : "pause.fill")
+                }
+                .disabled(snapshot.isIdle && !snapshot.isPaused)
+                .help(snapshot.isPaused ? "Resume the queue" : "Pause the queue")
+            }
+            .labelStyle(AdaptiveLabelStyle(iconOnly: iconOnly))
+        }
+    }
+
+    /// "312 skipped: unchanged \u{00B7} 4 skipped: kept existing \u{00B7} 9 skipped: filters"
+    private func skipSummary(_ s: TransferSnapshot) -> String? {
+        var parts = SkipReason.allCases.compactMap { reason in
+            s.skipReasons[reason].map { "\($0.formatted()) skipped: \(reason.title)" }
+        }
+        if s.filteredCount > 0 { parts.append("\(s.filteredCount.formatted()) skipped: filters") }
+        return parts.isEmpty ? nil : parts.joined(separator: " \u{00B7} ")
     }
 }
 
@@ -402,7 +425,7 @@ final class TransferTableCoordinator: NSObject, NSTableViewDataSource, NSTableVi
                 cell.detail.stringValue = error.replacingOccurrences(of: "Server replied ", with: "")
                 cell.detail.textColor = .systemRed
             } else {
-                var detail = RemotePathText.parent(job.destinationPath)
+                var detail = RemotePathText.destination(of: job)
                 if job.isDirectory, job.childCount > 0 { detail = "\(job.finishedChildCount.formatted()) of \(job.childCount.formatted()) items" }
                 cell.detail.stringValue = detail
                 cell.detail.textColor = .secondaryLabelColor
@@ -517,8 +540,15 @@ final class TransferTableCoordinator: NSObject, NSTableViewDataSource, NSTableVi
     }
 }
 
-/// Parent folder of a path for display.
+/// Where a job's file ends up, for the row subtitle.
 private enum RemotePathText {
+    /// The destination folder: on this Mac with the home folder shown as `~`, otherwise the remote path.
+    static func destination(of job: TransferJobInfo) -> String {
+        let folder = parent(job.destinationPath)
+        guard job.route.hasSuffix("\u{2192} This Mac") else { return folder }
+        return (folder as NSString).abbreviatingWithTildeInPath
+    }
+
     static func parent(_ path: String) -> String {
         let parts = path.split(separator: "/", omittingEmptySubsequences: true)
         guard parts.count > 1 else { return "/" }

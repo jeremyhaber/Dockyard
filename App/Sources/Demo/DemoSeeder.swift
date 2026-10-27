@@ -172,13 +172,18 @@ enum DemoSeeder {
         await app.refreshUndoState()
     }
 
+    /// Where demo downloads land; the Transfers tab shows it as ~/Downloads/acme-backups.
+    private static var demoDownloads: String {
+        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Downloads/acme-backups").path
+    }
+
     private static func enqueueTransfers(_ app: AppModel, relay: Bool) {
         let source = TransferEndpoint(fs: DemoFileSystem(kind: .server), label: "Acme Corp")
         let target = relay
             ? TransferEndpoint(fs: DemoFileSystem(kind: .server, flavor: .bluebird), label: "Bluebird Bakery")
             : TransferEndpoint.thisMac()
-        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("dockyard-demo").path
-        try? FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+        let folder = relay ? "/home/bluebird/backups" : demoDownloads
+        if !relay { try? FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true) }
         let files: [(String, UInt64)] = [
             ("db-2026-10-26.sql.gz", 480_000_000), ("site-2026-10-01.tar.gz", 1_820_000_000), ("db-2026-10-19.sql.gz", 471_300_000),
         ]
@@ -193,7 +198,7 @@ enum DemoSeeder {
 
     /// Several running, queued, finished and (for the Failed screen) failed transfers for the Transfers tab.
     private static func enqueueTransferScreen(_ app: AppModel, failures: Bool) {
-        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("dockyard-demo").path
+        let folder = demoDownloads
         try? FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
         let queue = app.queue
         let local = TransferEndpoint.thisMac()
