@@ -10,7 +10,7 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension, 
     private let context: MountContext
 
     required init(domain: NSFileProviderDomain) {
-        context = MountContext(domain: domain)
+        context = MountContext(identifier: domain.identifier.rawValue, displayName: domain.displayName)
         super.init()
     }
 
@@ -63,7 +63,7 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension, 
         Task {
             do {
                 guard let path = await context.path(for: itemIdentifier) else { throw NSFileProviderError(.noSuchItem) }
-                let directory = (try? NSFileProviderManager(for: context.domain)?.temporaryDirectoryURL()) ?? FileManager.default.temporaryDirectory
+                let directory = await context.temporaryDirectory()
                 let local = directory.appendingPathComponent(UUID().uuidString)
                 context.log(.status, "Download \(path)")
                 let remote = try await context.perform { fs -> RemoteItem? in

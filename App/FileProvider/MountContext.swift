@@ -12,7 +12,8 @@ actor MountContext {
         case readOnly
     }
 
-    nonisolated(unsafe) let domain: NSFileProviderDomain
+    let domainIdentifier: String
+    let displayName: String
     let connectionID: UUID
     private(set) var rootPath = "/"
     private(set) var readOnly = true
@@ -22,9 +23,19 @@ actor MountContext {
     private var connected = false
     private let poller = MountPoller()
 
-    init(domain: NSFileProviderDomain) {
-        self.domain = domain
-        self.connectionID = MountNaming.connectionId(fromDomainIdentifier: domain.identifier.rawValue) ?? UUID()
+    init(identifier: String, displayName: String) {
+        self.domainIdentifier = identifier
+        self.displayName = displayName
+        self.connectionID = MountNaming.connectionId(fromDomainIdentifier: identifier) ?? UUID()
+    }
+
+    private func manager() -> NSFileProviderManager? {
+        let domain = NSFileProviderDomain(identifier: NSFileProviderDomainIdentifier(rawValue: domainIdentifier), displayName: displayName)
+        return NSFileProviderManager(for: domain)
+    }
+
+    func temporaryDirectory() -> URL {
+        (try? manager()?.temporaryDirectoryURL()) ?? FileManager.default.temporaryDirectory
     }
 
     // MARK: Log
@@ -124,7 +135,7 @@ actor MountContext {
 
     func rootItem() async -> ProviderItem {
         ProviderItem(
-            remote: RemoteItem(name: domain.displayName, path: rootPath, isDirectory: true), identifier: .rootContainer,
+            remote: RemoteItem(name: displayName, path: rootPath, isDirectory: true), identifier: .rootContainer,
             parent: .rootContainer, readOnly: await isReadOnly())
     }
 
@@ -147,7 +158,7 @@ actor MountContext {
     func currentAnchor() async -> Int { await poller.anchor }
 
     func signalWorkingSet() {
-        guard let manager = NSFileProviderManager(for: domain) else { return }
+        guard let manager = manager() else { return }
         manager.signalEnumerator(for: .workingSet) { _ in }
     }
 

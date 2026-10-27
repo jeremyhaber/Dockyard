@@ -8,7 +8,9 @@ let package = Package(
     platforms: [.macOS(.v14)],
     products: [.library(name: "SwiftTerm", targets: ["SwiftTerm"])],
     targets: [
-        .target(name: "SwiftTerm", path: "Sources/SwiftTerm", exclude: ["Mac/README.md"]),
+        .target(
+            name: "SwiftTerm", path: "Sources/SwiftTerm", exclude: ["Mac/README.md"],
+            swiftSettings: [.unsafeFlags(["-suppress-warnings"])]),
     ],
     swiftLanguageVersions: [.v5]
 )
