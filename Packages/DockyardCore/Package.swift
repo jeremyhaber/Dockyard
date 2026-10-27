@@ -19,7 +19,11 @@ let package = Package(
                 .product(name: "GRDB", package: "GRDB.swift"),
             ]
         ),
-        .testTarget(name: "DockyardCoreTests", dependencies: ["DockyardCore"]),
+        .testTarget(
+            name: "DockyardCoreTests",
+            dependencies: ["DockyardCore"],
+            resources: [.copy("Fixtures")]
+        ),
     ],
     swiftLanguageModes: [.v6]
 )

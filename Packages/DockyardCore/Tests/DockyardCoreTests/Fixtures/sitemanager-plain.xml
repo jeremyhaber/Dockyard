@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<FileZilla3 version="3.66.5" platform="*nix">
+	<Servers>
+		<Folder expanded="1">Clients
+			<Folder expanded="0">Acme Corp
+				<Server>
+					<Host>ftp.acme.example</Host>
+					<Port>21</Port>
+					<Protocol>4</Protocol>
+					<Type>0</Type>
+					<User>acme_web</User>
+					<Pass encoding="base64">dGVzdC1wYXNzd29yZC0x</Pass>
+					<Logontype>1</Logontype>
+					<TimezoneOffset>0</TimezoneOffset>
+					<PasvMode>MODE_DEFAULT</PasvMode>
+					<MaximumMultipleConnections>0</MaximumMultipleConnections>
+					<EncodingType>Auto</EncodingType>
+					<BypassProxy>0</BypassProxy>
+					<Name>Acme Production</Name>
+					<Comments>Main site &amp; shop. Deploy to public_html</Comments>
+					<LocalDir>/home/jeremy/work/acme</LocalDir>
+					<RemoteDir>1 0 4 home 11 public_html</RemoteDir>
+					<SyncBrowsing>0</SyncBrowsing>
+					<DirectoryComparison>0</DirectoryComparison>
+					<Bookmarks>
+						<Bookmark>
+							<Name>Logs</Name>
+							<LocalDir>/home/jeremy/logs</LocalDir>
+							<RemoteDir>1 0 4 home 4 logs</RemoteDir>
+						</Bookmark>
+					</Bookmarks>
+				</Server>
+				<Server>
+					<Host>staging.acme.example</Host>
+					<Port>2222</Port>
+					<Protocol>1</Protocol>
+					<Type>0</Type>
+					<User>deploy</User>
+					<Logontype>5</Logontype>
+					<Keyfile>/Users/jeremy/.ssh/acme_ed25519</Keyfile>
+					<EncodingType>Auto</EncodingType>
+					<BypassProxy>0</BypassProxy>
+					<Name>Acme Staging</Name>
+					<Comments />
+					<LocalDir />
+					<RemoteDir />
+				</Server>
+			</Folder>
+			<Folder expanded="0">Globex
+				<Folder expanded="0">Legacy
+					<Server>
+						<Host>files.globex.example</Host>
+						<Port>0</Port>
+						<Protocol>0</Protocol>
+						<Type>0</Type>
+						<User>anonymous</User>
+						<Pass encoding="base64">YW5vbnltb3VzQA==</Pass>
+						<Logontype>0</Logontype>
+						<Name>Globex Public Mirror</Name>
+					</Server>
+					<Server>
+						<Host>sftp.globex.example</Host>
+						<Port>22</Port>
+						<Protocol>1</Protocol>
+						<User>gx</User>
+						<Logontype>2</Logontype>
+						<Name>Globex (ask for password)</Name>
+					</Server>
+				</Folder>
+			</Folder>
+		</Folder>
+		<Server>
+			<Host>legacy.example.org</Host>
+			<Port>990</Port>
+			<Protocol>3</Protocol>
+			<User>old</User>
+			<Pass>plain-text-secret</Pass>
+			<Logontype>1</Logontype>
+			<Name>Old plain-text entry</Name>
+		</Server>
+		<Server>
+			<Host>s3.amazonaws.example</Host>
+			<Protocol>7</Protocol>
+			<User>AKIAEXAMPLE</User>
+			<Logontype>1</Logontype>
+			<Name>Backup bucket</Name>
+		</Server>
+		<Server>
+			<Host></Host>
+			<Protocol>1</Protocol>
+			<Name>Broken entry</Name>
+		</Server>
+		<Server>
+			<Host>nopass.example.net</Host>
+			<Port>22</Port>
+			<Protocol>1</Protocol>
+			<User>bob</User>
+			<Logontype>1</Logontype>
+		</Server>
+	</Servers>
+</FileZilla3>
