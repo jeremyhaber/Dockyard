@@ -3,11 +3,20 @@ import ConnectionKit
 import DockyardCore
 import SwiftUI
 
+/// Hands focus to the terminal once it is in a window; SwiftUI's `onAppear` runs before that, when focusing does nothing.
+private final class TerminalContainerView: NSView {
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard let window, let terminal = subviews.first else { return }
+        window.makeFirstResponder(terminal)
+    }
+}
+
 struct TerminalHostView: NSViewRepresentable {
     let controller: TerminalController
 
     func makeNSView(context: Context) -> NSView {
-        let container = NSView()
+        let container = TerminalContainerView()
         let terminal = controller.view
         terminal.removeFromSuperview()
         terminal.frame = container.bounds
@@ -60,10 +69,7 @@ struct TerminalPane: View {
             }
         }
         .background(Palette.drawer)
-        .onAppear {
-            startIfReady()
-            controller.focus()
-        }
+        .onAppear { startIfReady() }
     }
 
     private func startIfReady() {

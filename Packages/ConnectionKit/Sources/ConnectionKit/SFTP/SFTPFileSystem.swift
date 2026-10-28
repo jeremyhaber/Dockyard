@@ -144,7 +144,7 @@ public actor SFTPFileSystem: RemoteFileSystem, RemoteCommandRunner {
     /// The live SSH session for shells and commands, reconnecting if needed.
     private func liveSSH() async throws -> SSHSession {
         _ = try await client()
-        let ssh = try await liveSSH()
+        guard let ssh else { throw RemoteError.notConnected }
         return ssh
     }
 
