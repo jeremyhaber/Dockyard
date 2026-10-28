@@ -1,6 +1,6 @@
 # 1Password
 
-Dockyard can import sites from 1Password, take secrets from 1Password at connect time instead of the Keychain, and authenticate SFTP through the 1Password SSH agent. Spec: `HANDOFF.md` section 11.
+Dockyard can import sites from 1Password, take secrets from 1Password at connect time instead of the Keychain, and authenticate SFTP through the 1Password SSH agent.
 
 ## Setup
 

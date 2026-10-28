@@ -137,8 +137,7 @@ extension AppModel {
                 return
             }
             if !AppGroup.isSigned {
-                alertMessage = "The setting is saved, but this build is not signed with Dockyard's App Group, so the Finder extension cannot load. "
-                    + "See docs/app.md for the signing setup."
+                alertMessage = "The setting is saved, but this build is not signed with Dockyard's App Group, so the Finder extension cannot load."
             } else {
                 showToast(mounted ? "\(connection.name) will appear in Finder under Locations" : "\(connection.name) removed from Finder")
             }

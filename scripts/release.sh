@@ -7,7 +7,7 @@
 # Needs: xcodegen, build/librclone/librclone.dylib (scripts/build-librclone.sh), the code-signing
 # identity below in the login Keychain, and Sparkle's tools (bin/ of the Sparkle release tarball,
 # SPARKLE_BIN) with the EdDSA private key from generate_keys in the Keychain.
-# Output: build/release/dist/Dockyard-<version>.zip and appcast.xml. See docs/app.md, "Releases".
+# Output: build/release/dist/Dockyard-<version>.zip and appcast.xml. See docs/internal/app.md, "Releases".
 set -euo pipefail
 
 IDENTITY="${SIGN_IDENTITY:-Dockyard Self-Signed}"

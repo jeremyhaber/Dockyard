@@ -46,7 +46,7 @@ final class UpdateModel {
             alert.messageText = "Updates are not set up in this build"
             alert.informativeText = DemoMode.isEnabled
                 ? "Update checks are turned off in demo mode."
-                : "This build has no update feed. Release builds are signed and published with an appcast; see docs/app.md."
+                : "This build has no update feed. Download releases from github.com/jeremyhaber/Dockyard to get updates."
             alert.runModal()
             return
         }
