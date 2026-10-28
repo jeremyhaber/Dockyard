@@ -25,3 +25,6 @@ App/id_*
 
 # Private docs (jeremyhaber/dockyard-docs), cloned locally
 docs/internal/
+
+# Claude Code instructions, kept local
+CLAUDE.md

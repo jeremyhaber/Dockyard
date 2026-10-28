@@ -79,9 +79,20 @@ struct PaneView: View {
 
 struct FolderTabsBar: View {
     let pane: PaneModel
+    @State private var contentWidth: CGFloat = 0
+    @State private var viewportWidth: CGFloat = 0
+    @State private var legacyScrollers = NSScroller.preferredScrollerStyle == .legacy
+
+    private static let rowHeight: CGFloat = 30
+
+    /// Legacy (always-visible) scrollers take space below the tabs instead of drawing over them.
+    private var scrollerRoom: CGFloat {
+        guard legacyScrollers, contentWidth > viewportWidth + 0.5 else { return 0 }
+        return NSScroller.scrollerWidth(for: .regular, scrollerStyle: .legacy)
+    }
 
     var body: some View {
-        HStack(spacing: 0) {
+        HStack(alignment: .top, spacing: 0) {
             ScrollViewReader { proxy in
                 ScrollView(.horizontal) {
                     HStack(spacing: 4) {
@@ -95,14 +106,18 @@ struct FolderTabsBar: View {
                         }
                     }
                     .padding(.horizontal, 6)
-                    .frame(maxHeight: .infinity)
+                    .frame(height: Self.rowHeight)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { contentWidth = $0 }
                 }
-                .scrollIndicators(.never)
+                .scrollIndicators(.automatic)
+                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { viewportWidth = $0 }
                 .onAppear { reveal(proxy) }
                 .onChange(of: pane.activeTabIndex) { reveal(proxy) }
                 .onChange(of: pane.state.tabs.count) { reveal(proxy) }
             }
-            Divider().padding(.vertical, 6)
+            Divider()
+                .frame(height: Self.rowHeight - 12)
+                .padding(.top, 6)
             Button {
                 pane.openTab()
             } label: {
@@ -115,9 +130,13 @@ struct FolderTabsBar: View {
             .help("New folder tab (\u{2318}T)")
             .accessibilityLabel("New folder tab")
             .padding(.horizontal, 4)
+            .frame(height: Self.rowHeight)
         }
-        .frame(height: 30)
+        .frame(height: Self.rowHeight + scrollerRoom)
         .background(Palette.chrome)
+        .onReceive(NotificationCenter.default.publisher(for: NSScroller.preferredScrollerStyleDidChangeNotification)) { _ in
+            legacyScrollers = NSScroller.preferredScrollerStyle == .legacy
+        }
     }
 
     private func reveal(_ proxy: ScrollViewProxy) {
