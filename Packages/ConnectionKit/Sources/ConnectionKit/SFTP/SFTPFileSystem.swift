@@ -1,18 +1,27 @@
-import Citadel
 import Foundation
-import NIOCore
 
-/// SFTP over SSH using Citadel.
-public actor SFTPFileSystem: RemoteFileSystem {
+/// SFTP over SSH using libssh2 for the transport and `SFTPClient` for the protocol.
+public actor SFTPFileSystem: RemoteFileSystem, RemoteCommandRunner {
+    public struct Options: Sendable {
+        /// Start `sftp-server` as root through the configured `su`/`sudo` elevation. Falls back to the
+        /// normal user (with a warning in the log) when elevation fails.
+        public var browseAsRoot = false
+        public var session = SSHSessionOptions()
+        /// Hosts to tunnel through, outermost first. Each hop is an SSH connection of its own.
+        public var jumpHosts: [SSHJumpHop] = []
+
+        public init(browseAsRoot: Bool = false) { self.browseAsRoot = browseAsRoot }
+    }
+
     public nonisolated let config: ConnectionConfig
     private let secrets: SecretStore
     private let hostKeyValidator: SSHHostKeyValidator
+    private let options: Options
     private let hub = LogHub()
 
-    private var ssh: Boxed<SSHClient>?
-    private var sftp: Boxed<SFTPClient>?
-
-    private static let chunkSize = 64 * 1024
+    private var ssh: SSHSession?
+    private var sftp: SFTPClient?
+    public private(set) var isBrowsingAsRoot = false
 
     public nonisolated var logStream: AsyncStream<LogLine> { hub.stream() }
     public nonisolated var supportsShell: Bool { true }
@@ -20,11 +29,13 @@ public actor SFTPFileSystem: RemoteFileSystem {
     public init(
         config: ConnectionConfig,
         secrets: SecretStore,
-        hostKeyValidator: SSHHostKeyValidator = .acceptAnything()
+        hostKeyValidator: SSHHostKeyValidator = .acceptAnything(),
+        options: Options = Options()
     ) {
         self.config = config
         self.secrets = secrets
         self.hostKeyValidator = hostKeyValidator
+        self.options = options
     }
 
     // MARK: Connection
@@ -33,31 +44,10 @@ public actor SFTPFileSystem: RemoteFileSystem {
         await disconnectQuietly()
         hub.emit(.status, "Connecting to \(config.host):\(config.port)...")
         do {
-            let attempts = try await loadAttempts()
-            var lastError: Error = RemoteError.authenticationFailed("No authentication method available")
-            for (index, attempt) in attempts.enumerated() {
-                hub.emit(.status, "Authenticating as \(config.username) using \(attempt.label)")
-                let username = config.username
-                let method = attempt.method
-                let settings = SSHClientSettings(
-                    host: config.host,
-                    port: config.port,
-                    authenticationMethod: { method(username) },
-                    hostKeyValidator: hostKeyValidator
-                )
-                do {
-                    ssh = Boxed(try await SSHClient.connect(to: settings))
-                    hub.emit(.status, "Authenticated with \(attempt.label)")
-                    lastError = RemoteError.notConnected
-                    break
-                } catch where SSHAuthAttempt.isRejection(error) {
-                    lastError = RemoteError.authenticationFailed("The server rejected \(attempt.label) authentication")
-                    let next = index + 1 < attempts.count ? "; trying \(attempts[index + 1].label)" : ""
-                    hub.emit(.warning, "\(attempt.label.prefix(1).uppercased() + attempt.label.dropFirst()) authentication rejected\(next)")
-                }
-            }
-            guard ssh != nil else { throw lastError }
-            try await openChannel()
+            let session = try await connectSession()
+            ssh = session
+            try await session.authenticate(username: config.username, steps: try await SSHAuth.steps(for: config, secrets: secrets))
+            try await openSFTP(on: session)
             hub.emit(.status, "SFTP subsystem ready")
         } catch {
             hub.emit(.error, "Connection failed: \(error)")
@@ -72,75 +62,118 @@ public actor SFTPFileSystem: RemoteFileSystem {
     }
 
     private func disconnectQuietly() async {
-        try? await sftp?.value.close()
-        try? await ssh?.value.close()
+        if let sftp { try? await sftp.run { $0.close() } }
+        await ssh?.close()
         sftp = nil
         ssh = nil
+        isBrowsingAsRoot = false
     }
 
-    private func loadAttempts() async throws -> [SSHAuthAttempt] {
-        var attempts: [SSHAuthAttempt] = []
-        if config.authMethods.contains(.key) {
-            guard let keyPath = config.keyPath else { throw RemoteError.invalidConfiguration("Key authentication needs a key path") }
-            let passphrase = try await secrets.secret(for: config.id, purpose: .keyPassphrase)
-            attempts.append(try .key(path: keyPath, passphrase: passphrase))
-        }
-        if config.authMethods.contains(.password) {
-            if let password = try await secrets.secret(for: config.id, purpose: .password) {
-                attempts.append(.password(password))
-            } else if attempts.isEmpty {
-                throw RemoteError.authenticationFailed("No password stored for this connection")
-            }
-        }
-        guard !attempts.isEmpty else { throw RemoteError.invalidConfiguration("No authentication method selected") }
-        return attempts
-    }
-
-    private func openChannel() async throws {
-        guard let ssh else { throw RemoteError.notConnected }
-        try? await sftp?.value.close()
-        sftp = Boxed(try await ssh.value.openSFTP())
-    }
-
-    private func client() throws -> Boxed<SFTPClient> {
-        guard let sftp, sftp.value.isActive else { throw RemoteError.notConnected }
-        return sftp
-    }
-
-    private func withFile<R>(_ file: Boxed<SFTPFile>, _ body: () async throws -> R) async throws -> R {
+    /// Connects the whole jump chain and returns the session for the final host (not yet authenticated).
+    private func connectSession() async throws -> SSHSession {
+        let hub = self.hub
+        var upstream: SSHSession?
         do {
-            let result = try await body()
-            try await file.value.close()
-            return result
+            for hop in options.jumpHosts {
+                hub.emit(.status, "Connecting to jump host \(hop.config.host):\(hop.config.port)...")
+                let session = try await SSHSession.connect(
+                    host: hop.config.host, port: hop.config.port, via: upstream, options: options.session,
+                    validator: hop.hostKeyValidator ?? hostKeyValidator
+                ) { hub.emit($0, "[\(hop.config.host)] \($1)") }
+                upstream = session
+                try await session.authenticate(username: hop.config.username, steps: try await SSHAuth.steps(for: hop.config, secrets: hop.secrets))
+            }
+            if upstream != nil { hub.emit(.status, "Connecting to \(config.host):\(config.port) through the jump host...") }
+            return try await SSHSession.connect(
+                host: config.host, port: config.port, via: upstream, options: options.session, validator: hostKeyValidator
+            ) { hub.emit($0, $1) }
         } catch {
-            try? await file.value.close()
+            await upstream?.close()
             throw error
         }
     }
 
+    private func openSFTP(on session: SSHSession) async throws {
+        if options.browseAsRoot, config.elevation != .none {
+            let method = config.elevation == .su ? "su" : "sudo"
+            do {
+                let password = try await secrets.secret(for: config.id, purpose: .elevationPassword)
+                hub.emit(.status, "Starting sftp-server as root through \(method)")
+                sftp = try await session.openElevatedSFTP(kind: config.elevation, password: password)
+                isBrowsingAsRoot = true
+                hub.emit(.status, "Browsing files as root")
+                return
+            } catch {
+                hub.emit(.warning, "Could not browse as root through \(method) (\(error)); using the normal user")
+            }
+        }
+        sftp = try await session.openSFTP()
+    }
+
+    private func client() throws -> SFTPClient {
+        guard let sftp else { throw RemoteError.notConnected }
+        return sftp
+    }
+
+    // MARK: Shell and exec on the same connection
+
+    /// Opens a terminal on the existing SSH connection. Uses the configured elevation (`su -` / `sudo -i`).
+    public func openShell(cols: Int, rows: Int) async throws -> ShellChannel {
+        guard let ssh else { throw RemoteError.notConnected }
+        var elevation: ShellElevation?
+        if config.elevation != .none {
+            elevation = ShellElevation(kind: config.elevation, password: try await secrets.secret(for: config.id, purpose: .elevationPassword))
+        }
+        hub.emit(.status, "Opening shell (\(cols)x\(rows))")
+        return try await ssh.openShell(cols: cols, rows: rows, elevation: elevation)
+    }
+
+    public func exec(_ command: String) async throws -> SSHExecResult {
+        guard let ssh else { throw RemoteError.notConnected }
+        hub.emit(.command, command)
+        return try await ssh.exec(command)
+    }
+
+    /// Runs a command and streams its output and exit status. With `elevated` and an `su`/`sudo` setting it
+    /// runs as root (`canElevateCommands` says whether the file browser is root too). Cancelling the
+    /// consuming task (or dropping the stream) kills the remote process group.
+    public func execStream(_ command: String, elevated: Bool) async throws -> AsyncThrowingStream<SSHExecEvent, Error> {
+        guard let ssh else { throw RemoteError.notConnected }
+        var elevation: ShellElevation?
+        if elevated, config.elevation != .none {
+            elevation = ShellElevation(kind: config.elevation, password: try await secrets.secret(for: config.id, purpose: .elevationPassword))
+        }
+        hub.emit(.command, elevation == nil ? command : "[\(config.elevation == .su ? "su" : "sudo")] \(command)")
+        return ssh.execStream(command, elevation: elevation)
+    }
+
+    public var canElevateCommands: Bool { isBrowsingAsRoot }
+
     // MARK: Listing
 
     public func homeDirectory() async throws -> String {
-        try await client().value.getRealPath(atPath: ".")
+        let sftp = try client()
+        do { return try await sftp.run { try $0.realpath(".") } } catch { throw map(error, path: ".") }
     }
 
     public func list(_ path: String) async throws -> [RemoteItem] {
-        let sftp = try client().value
-        hub.emit(.status, "Listing directory \(path)")
+        let sftp = try client()
         let dir = path.isEmpty ? "." : path
-
-        let names: [SFTPMessage.Name]
-        do {
-            names = try await sftp.listDirectory(atPath: dir)
-        } catch {
-            throw map(error, path: dir)
-        }
+        hub.emit(.status, "Listing directory \(dir)")
+        let entries: [SFTPEntry]
+        do { entries = try await sftp.run { try $0.listDirectory(dir) } } catch { throw map(error, path: dir) }
 
         var items: [RemoteItem] = []
-        for component in names.flatMap(\.components) where component.filename != "." && component.filename != ".." {
-            var item = Self.item(from: component, parent: dir)
-            if item.isSymlink, let target = try? await sftp.getAttributes(at: item.path) {
-                item.isDirectory = Self.isDirectory(target.permissions)
+        items.reserveCapacity(entries.count)
+        for entry in entries {
+            let itemPath = RemotePath.join(dir, entry.name)
+            var item = Self.item(name: entry.name, path: itemPath, attributes: entry.attributes)
+            if entry.attributes.isSymlink {
+                let resolved = try? await sftp.run { client -> (String, SFTPAttributes?) in
+                    (try client.readlink(itemPath), try? client.stat(itemPath, followLinks: true))
+                }
+                item.symlinkTarget = resolved?.0 ?? ""
+                item.isDirectory = resolved?.1?.isDirectory ?? false
             }
             items.append(item)
         }
@@ -149,82 +182,46 @@ public actor SFTPFileSystem: RemoteFileSystem {
     }
 
     public func stat(_ path: String) async throws -> RemoteItem? {
-        let sftp = try client().value
+        let sftp = try client()
         do {
-            let attributes = try await sftp.getAttributes(at: path)
-            return Self.item(name: RemotePath.lastComponent(of: path), path: path, attributes: attributes, symlinkTarget: nil)
-        } catch let status as SFTPMessage.Status where status.errorCode == .noSuchFile {
+            let attributes = try await sftp.run { try $0.stat(path, followLinks: false) }
+            var item = Self.item(name: RemotePath.lastComponent(of: path), path: path, attributes: attributes)
+            if attributes.isSymlink {
+                let resolved = try? await sftp.run { client -> (String, SFTPAttributes?) in
+                    (try client.readlink(path), try? client.stat(path, followLinks: true))
+                }
+                item.symlinkTarget = resolved?.0 ?? ""
+                item.isDirectory = resolved?.1?.isDirectory ?? false
+            }
+            return item
+        } catch let status as SFTPStatusError where status.known == .noSuchFile {
             return nil
         } catch {
             throw map(error, path: path)
         }
     }
 
-    private static let fileTypeMask: UInt32 = 0o170000
-
-    private static func isDirectory(_ permissions: UInt32?) -> Bool {
-        permissions.map { $0 & fileTypeMask == 0o040000 } ?? false
-    }
-
-    private static func item(from component: SFTPPathComponent, parent: String) -> RemoteItem {
-        var target: String?
-        if component.attributes.permissions.map({ $0 & fileTypeMask == 0o120000 }) == true {
-            target = component.longname.range(of: " -> ", options: .backwards).map { String(component.longname[$0.upperBound...]) } ?? ""
-        }
-        return item(name: component.filename, path: RemotePath.join(parent, component.filename), attributes: component.attributes, symlinkTarget: target)
-    }
-
-    private static func item(name: String, path: String, attributes: SFTPFileAttributes, symlinkTarget: String?) -> RemoteItem {
+    private static func item(name: String, path: String, attributes: SFTPAttributes) -> RemoteItem {
         RemoteItem(
             name: name,
             path: path,
-            isDirectory: isDirectory(attributes.permissions),
+            isDirectory: attributes.isDirectory,
             size: attributes.size,
-            modified: attributes.accessModificationTime?.modificationTime,
-            permissions: attributes.permissions.map { UInt16($0 & 0o7777) },
-            symlinkTarget: symlinkTarget
+            modified: attributes.modified,
+            permissions: attributes.permissions.map { UInt16($0 & 0o7777) }
         )
     }
 
     // MARK: Transfers
 
     public func download(_ remote: String, to local: URL, progress: Progress, resume: Bool) async throws {
-        let sftp = try client().value
+        let sftp = try client()
+        let hub = self.hub
         do {
-            let file = Boxed(try await sftp.openFile(filePath: remote, flags: .read))
-            try await withFile(file) {
-                let total = try await file.value.readAttributes().size
-                var offset: UInt64 = 0
-                if resume, let existing = LocalFile.size(of: local), existing > 0, total == nil || existing < total! {
-                    offset = existing
-                }
-                if let total, total > 0, LocalFile.size(of: local) == total, resume {
-                    progress.totalUnitCount = Int64(total)
-                    progress.completedUnitCount = Int64(total)
-                    return
-                }
-                if offset == 0 { _ = FileManager.default.createFile(atPath: local.path, contents: nil) }
-                let handle = try FileHandle(forWritingTo: local)
-                defer { try? handle.close() }
-                try handle.truncate(atOffset: offset)
-                try handle.seek(toOffset: offset)
-
-                progress.totalUnitCount = Int64(total ?? 0)
-                progress.completedUnitCount = Int64(offset)
+            let bytes = try await SFTPTransfer.download(sftp, remote: remote, to: local, resume: resume, progress: progress) { offset in
                 hub.emit(.status, "get \(remote)\(offset > 0 ? " (resuming at \(offset))" : "")")
-
-                while true {
-                    try Task.checkCancellation()
-                    if progress.isCancelled { throw CancellationError() }
-                    var chunk = try await file.value.read(from: offset, length: UInt32(Self.chunkSize))
-                    guard chunk.readableBytes > 0 else { break }
-                    let bytes = chunk.readBytes(length: chunk.readableBytes) ?? []
-                    try handle.write(contentsOf: bytes)
-                    offset += UInt64(bytes.count)
-                    progress.completedUnitCount = Int64(offset)
-                }
-                hub.emit(.status, "get \(remote) finished (\(offset) bytes)")
             }
+            hub.emit(.status, "get \(remote) finished (\(bytes) bytes)")
         } catch {
             hub.emit(.error, "Download of \(remote) failed: \(error)")
             throw map(error, path: remote)
@@ -232,95 +229,78 @@ public actor SFTPFileSystem: RemoteFileSystem {
     }
 
     public func upload(_ local: URL, to remote: String, progress: Progress, resume: Bool) async throws {
-        let sftp = try client().value
+        let sftp = try client()
+        let hub = self.hub
         guard let total = LocalFile.size(of: local) else { throw RemoteError.notFound(local.path) }
         do {
-            var offset: UInt64 = 0
-            if resume, let existing = try await stat(remote)?.size, existing > 0, existing <= total {
-                offset = existing
+            let bytes = try await SFTPTransfer.upload(sftp, local: local, remote: remote, total: total, resume: resume, progress: progress) { offset in
+                hub.emit(.status, "put \(remote)\(offset > 0 ? " (resuming at \(offset))" : "")")
             }
-            progress.totalUnitCount = Int64(total)
-            progress.completedUnitCount = Int64(offset)
-            hub.emit(.status, "put \(remote)\(offset > 0 ? " (resuming at \(offset))" : "")")
-
-            let flags: SFTPOpenFileFlags = offset > 0 ? [.write] : [.write, .create, .truncate]
-            let file = Boxed(try await sftp.openFile(filePath: remote, flags: flags))
-            try await withFile(file) {
-                let handle = try FileHandle(forReadingFrom: local)
-                defer { try? handle.close() }
-                try handle.seek(toOffset: offset)
-
-                while let chunk = try handle.read(upToCount: Self.chunkSize), !chunk.isEmpty {
-                    try Task.checkCancellation()
-                    if progress.isCancelled { throw CancellationError() }
-                    try await file.value.write(ByteBuffer(bytes: chunk), at: offset)
-                    offset += UInt64(chunk.count)
-                    progress.completedUnitCount = Int64(offset)
-                }
-                hub.emit(.status, "put \(remote) finished (\(offset) bytes)")
-            }
+            hub.emit(.status, "put \(remote) finished (\(bytes) bytes)")
+            await preserveModificationTime(of: local, on: remote)
         } catch {
             hub.emit(.error, "Upload of \(remote) failed: \(error)")
             throw map(error, path: remote)
         }
     }
 
-    // MARK: Namespace operations
-
-    public func mkdir(_ path: String) async throws {
-        hub.emit(.status, "mkdir \(path)")
-        do { try await client().value.createDirectory(atPath: path) } catch { throw map(error, path: path) }
-    }
-
-    public func rename(_ from: String, _ to: String) async throws {
-        hub.emit(.status, "rename \(from) -> \(to)")
-        do { try await client().value.rename(at: from, to: to) } catch { throw map(error, path: from) }
-    }
-
-    public func delete(_ path: String, recursive: Bool) async throws {
-        let sftp = try client().value
-        hub.emit(.status, "rm\(recursive ? " -r" : "") \(path)")
-        do {
-            try await remove(path, recursive: recursive, on: sftp)
-        } catch {
-            throw map(error, path: path)
+    private func preserveModificationTime(of local: URL, on remote: String) async {
+        guard let sftp, let date = (try? FileManager.default.attributesOfItem(atPath: local.path))?[.modificationDate] as? Date else { return }
+        let seconds = UInt32(clamping: Int64(date.timeIntervalSince1970))
+        let attributes = SFTPAttributes(accessTime: seconds, modifiedTime: seconds)
+        do { try await sftp.run { try $0.setstat(remote, attributes) } } catch {
+            hub.emit(.warning, "Could not set the modification time of \(remote): \(error)")
         }
     }
 
-    /// Uses the directory listing (lstat semantics) so symlinks are removed, never followed.
-    private func remove(_ path: String, recursive: Bool, on sftp: SFTPClient) async throws {
-        let parent = RemotePath.parent(of: path)
-        let name = RemotePath.lastComponent(of: path)
-        let entry = try await sftp.listDirectory(atPath: parent).flatMap(\.components).first { $0.filename == name }
-        guard let entry else { throw RemoteError.notFound(path) }
+    // MARK: Namespace operations
 
-        if Self.isDirectory(entry.attributes.permissions) {
+    public func mkdir(_ path: String) async throws {
+        let sftp = try client()
+        hub.emit(.status, "mkdir \(path)")
+        do { try await sftp.run { try $0.mkdir(path) } } catch { throw map(error, path: path) }
+    }
+
+    public func rename(_ from: String, _ to: String) async throws {
+        let sftp = try client()
+        hub.emit(.status, "rename \(from) -> \(to)")
+        do { try await sftp.run { try $0.rename(from, to) } } catch { throw map(error, path: from) }
+    }
+
+    public func delete(_ path: String, recursive: Bool) async throws {
+        let sftp = try client()
+        hub.emit(.status, "rm\(recursive ? " -r" : "") \(path)")
+        do { try await remove(path, recursive: recursive, on: sftp) } catch { throw map(error, path: path) }
+    }
+
+    /// Uses lstat semantics so symlinks are removed, never followed.
+    private func remove(_ path: String, recursive: Bool, on sftp: SFTPClient) async throws {
+        let attributes = try await sftp.run { try $0.stat(path, followLinks: false) }
+        if attributes.isDirectory {
             if recursive {
-                for child in try await sftp.listDirectory(atPath: path).flatMap(\.components) where child.filename != "." && child.filename != ".." {
-                    try await remove(RemotePath.join(path, child.filename), recursive: true, on: sftp)
+                for child in try await sftp.run({ try $0.listDirectory(path) }) {
+                    try await remove(RemotePath.join(path, child.name), recursive: true, on: sftp)
                 }
             }
-            try await client().value.rmdir(at: path)
+            try await sftp.run { try $0.rmdir(path) }
         } else {
-            try await sftp.remove(at: path)
+            try await sftp.run { try $0.remove(path) }
         }
     }
 
     public func chmod(_ path: String, mode: UInt16) async throws {
+        let sftp = try client()
         hub.emit(.status, "chmod \(String(mode & 0o7777, radix: 8)) \(path)")
-        var attributes = SFTPFileAttributes()
-        attributes.permissions = UInt32(mode & 0o7777)
-        do { try await client().value.setAttributes(at: path, to: attributes) } catch { throw map(error, path: path) }
+        let attributes = SFTPAttributes(permissions: UInt32(mode & 0o7777))
+        do { try await sftp.run { try $0.setstat(path, attributes) } } catch { throw map(error, path: path) }
     }
 
     private func map(_ error: Error, path: String) -> Error {
-        if let status = error as? SFTPMessage.Status {
-            switch status.errorCode {
-            case .noSuchFile: return RemoteError.notFound(path)
-            case .permissionDenied: return RemoteError.permissionDenied(path)
-            default: return RemoteError.protocolError(status.message)
-            }
+        guard let status = error as? SFTPStatusError else { return error }
+        switch status.known {
+        case .noSuchFile: return RemoteError.notFound(path)
+        case .permissionDenied: return RemoteError.permissionDenied(path)
+        default: return RemoteError.protocolError(status.message.isEmpty ? "SFTP error \(status.code) for \(path)" : status.message)
         }
-        return error
     }
 }

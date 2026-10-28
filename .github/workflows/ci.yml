@@ -9,6 +9,13 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: write
+
+env:
+  HOMEBREW_NO_AUTO_UPDATE: "1"
+  HOMEBREW_NO_INSTALL_CLEANUP: "1"
+
 jobs:
   packages-macos:
     runs-on: macos-latest
@@ -16,11 +23,115 @@ jobs:
       - uses: actions/checkout@v4
       - name: Toolchain
         run: swift --version
+      - name: Cache SwiftPM
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/org.swift.swiftpm
+            ~/Library/org.swift.swiftpm
+            Packages/*/.build
+          key: spm-${{ runner.os }}-${{ hashFiles('Packages/*/Package.swift') }}-${{ github.sha }}
+          restore-keys: |
+            spm-${{ runner.os }}-${{ hashFiles('Packages/*/Package.swift') }}-
+            spm-${{ runner.os }}-
       - name: Build and test packages
         run: |
           set -e
           for pkg in Packages/*/; do
             echo "::group::$pkg"
-            (cd "$pkg" && swift build --build-tests && swift test)
+            (cd "$pkg" && { swift build --build-tests && swift test --no-parallel; } 2>&1 | tee "$RUNNER_TEMP/test.log"; exit ${PIPESTATUS[0]}) || {
+              grep -h "SCALE" "$RUNNER_TEMP/test.log" | while IFS= read -r line; do echo "::notice title=scale::$line"; done || true
+              grep -E "recorded an issue|Fatal error|error: " "$RUNNER_TEMP/test.log" | head -80 | while IFS= read -r line; do echo "::error title=$pkg::$line"; done
+              exit 1
+            }
+            grep -h "SCALE" "$RUNNER_TEMP/test.log" | while IFS= read -r line; do echo "::notice title=scale::$line"; done || true
             echo "::endgroup::"
           done
+
+  librclone-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache librclone
+        id: librclone-cache
+        uses: actions/cache@v4
+        with:
+          path: build/librclone
+          key: librclone-${{ runner.os }}-${{ hashFiles('scripts/build-librclone.sh') }}
+      - uses: actions/setup-go@v5
+        if: steps.librclone-cache.outputs.cache-hit != 'true'
+        with:
+          go-version: "1.24"
+      - name: Build universal librclone
+        if: steps.librclone-cache.outputs.cache-hit != 'true'
+        run: scripts/build-librclone.sh shared
+      - name: Check architectures
+        run: lipo -info build/librclone/librclone.dylib
+      - name: RcloneKit tests with the real library
+        working-directory: Packages/RcloneKit
+        run: DOCKYARD_LIBRCLONE="$GITHUB_WORKSPACE/build/librclone/librclone.dylib" swift test
+
+  app-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Cache Xcode packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/SourcePackages
+          key: xcspm-${{ runner.os }}-${{ hashFiles('App/project.yml', 'Packages/*/Package.swift') }}
+          restore-keys: xcspm-${{ runner.os }}-
+      - name: Generate project
+        working-directory: App
+        run: xcodegen
+      - name: Build app
+        working-directory: App
+        run: |
+          set -o pipefail
+          xcodebuild -scheme Dockyard -configuration Debug -destination 'platform=macOS' \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" -clonedSourcePackagesDirPath "$RUNNER_TEMP/SourcePackages" \
+            CODE_SIGNING_ALLOWED=NO build 2>&1 \
+            | tee "$RUNNER_TEMP/xcodebuild.log" | tail -n 40
+          test -d "$RUNNER_TEMP/DerivedData/Build/Products/Debug/Dockyard.app"
+      - name: Screenshots (demo mode)
+        if: success()
+        run: scripts/ci/screenshots.sh "$RUNNER_TEMP/DerivedData/Build/Products/Debug/Dockyard.app" "$RUNNER_TEMP/screenshots"
+      - name: Upload screenshots
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: ${{ runner.temp }}/screenshots
+      - name: Publish screenshots branch
+        if: success() && github.event_name == 'push'
+        env:
+          REF: ${{ github.ref_name }}
+        run: |
+          cd "$RUNNER_TEMP/screenshots"
+          git init -q -b screenshots
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "Screenshots for $REF @ ${GITHUB_SHA::7}"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" "HEAD:refs/heads/screenshots/$REF"
+      - name: Compiler diagnostics
+        if: always()
+        run: |
+          grep -A12 -E "Could not resolve|resolution" "$RUNNER_TEMP/xcodebuild.log" | head -40 | while IFS= read -r line; do echo "::error::$line"; done
+          grep -E "error:" "$RUNNER_TEMP/xcodebuild.log" | sort -u | head -60 | while IFS= read -r line; do echo "::error::$line"; done
+          grep -E "warning:" "$RUNNER_TEMP/xcodebuild.log" | grep -v "Node.js" | sort -u | head -60 | while IFS= read -r line; do echo "::warning::$line"; done
+          true
+      - name: Build log tail
+        if: failure()
+        run: |
+          tail -n 25 "$RUNNER_TEMP/xcodebuild.log" | cut -c1-300 | while IFS= read -r line; do echo "::warning::$line"; done
+          grep -A14 -m1 "Stack dump" "$RUNNER_TEMP/xcodebuild.log" | grep -v "Program arguments" | cut -c1-300 | while IFS= read -r line; do echo "::error::$line"; done
+          grep -B45 -m1 "Command SwiftCompile failed" "$RUNNER_TEMP/xcodebuild.log" | grep -v "^ *\(cd\|/Applications\|builtin\|export\|env\)" | cut -c1-300 | while IFS= read -r line; do echo "::error::$line"; done
+          grep -nE "BUILD FAILED|error: |Command .* failed" "$RUNNER_TEMP/xcodebuild.log" | tail -n 30 | cut -c1-300 | while IFS= read -r line; do echo "::error::$line"; done
+          true

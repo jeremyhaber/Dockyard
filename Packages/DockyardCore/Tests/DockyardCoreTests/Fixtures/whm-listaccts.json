@@ -1,0 +1,75 @@
+{
+   "data" : {
+      "acct" : [
+         {
+            "disklimit" : "unlimited",
+            "diskused" : "154M",
+            "domain" : "acme-shop.example",
+            "email" : "owner@acme-shop.example",
+            "ip" : "203.0.113.10",
+            "is_locked" : 0,
+            "legacy_backup" : 0,
+            "maxaddons" : "unlimited",
+            "maxftp" : "unlimited",
+            "maxlst" : "unlimited",
+            "maxparked" : "unlimited",
+            "maxpop" : "unlimited",
+            "maxsql" : "unlimited",
+            "maxsub" : "unlimited",
+            "migrated_from" : "",
+            "outgoing_mail_hold" : 0,
+            "outgoing_mail_suspended" : 0,
+            "owner" : "root",
+            "partition" : "home",
+            "plan" : "Standard",
+            "shell" : "/bin/bash",
+            "startdate" : "23 Mar 4 10:21",
+            "suspended" : 0,
+            "suspendreason" : "not suspended",
+            "suspendtime" : 0,
+            "theme" : "jupiter",
+            "uid" : "1001",
+            "unix_startdate" : 1680603700,
+            "user" : "acmeshop"
+         },
+         {
+            "disklimit" : "5000M",
+            "diskused" : "4812M",
+            "domain" : "bluebird.example",
+            "email" : "hello@bluebird.example",
+            "ip" : "203.0.113.10",
+            "is_locked" : 0,
+            "owner" : "root",
+            "partition" : "home",
+            "plan" : "Business",
+            "shell" : "/usr/local/cpanel/bin/jailshell",
+            "startdate" : "22 Nov 12 08:02",
+            "suspended" : 1,
+            "suspendreason" : "Unpaid invoice",
+            "suspendtime" : 1700000000,
+            "theme" : "jupiter",
+            "uid" : "1002",
+            "unix_startdate" : 1668240120,
+            "user" : "bluebird"
+         },
+         {
+            "diskused" : "0M",
+            "domain" : "newsite.example",
+            "email" : "*unknown*",
+            "ip" : "203.0.113.11",
+            "owner" : "reseller1",
+            "plan" : "",
+            "suspended" : 0,
+            "suspendreason" : "not suspended",
+            "unix_startdate" : 1760000000,
+            "user" : "newsite"
+         }
+      ]
+   },
+   "metadata" : {
+      "command" : "listaccts",
+      "reason" : "OK",
+      "result" : 1,
+      "version" : 1
+   }
+}

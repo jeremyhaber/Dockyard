@@ -1,0 +1,8 @@
+{
+   "metadata" : {
+      "command" : "listaccts",
+      "reason" : "Access denied: this API token does not have the list-accts privilege.",
+      "result" : 0,
+      "version" : 1
+   }
+}

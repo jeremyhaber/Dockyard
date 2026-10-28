@@ -1,0 +1,36 @@
+{
+  "id": "h2j4l6n8p0r2t4v6x8z0b2d4fh",
+  "title": "Umbrella hosting",
+  "version": 1,
+  "vault": {
+    "id": "p9a2c4e6g8i0k2m4o6q8s0u2wy",
+    "name": "Clients"
+  },
+  "category": "LOGIN",
+  "tags": [],
+  "urls": [
+    {
+      "label": "website",
+      "primary": true,
+      "href": "https://panel.umbrella.example:8443/login"
+    }
+  ],
+  "fields": [
+    {
+      "id": "username",
+      "type": "STRING",
+      "purpose": "USERNAME",
+      "label": "username",
+      "value": "wesker",
+      "reference": "op://Clients/Umbrella hosting/username"
+    },
+    {
+      "id": "password",
+      "type": "CONCEALED",
+      "purpose": "PASSWORD",
+      "label": "password",
+      "value": "pw-umbrella",
+      "reference": "op://Clients/Umbrella hosting/password"
+    }
+  ]
+}

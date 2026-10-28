@@ -1,0 +1,588 @@
+import AppKit
+import ConnectionKit
+import DockyardCore
+import SwiftUI
+
+// MARK: - AppKit pieces
+
+final class FileNSTableView: NSTableView {
+    var onCommandClickRow: ((Int) -> Bool)?
+    var onReturn: (() -> Void)?
+    var onDeleteKey: (() -> Void)?
+    var onSpace: (() -> Void)?
+    var onFocus: (() -> Void)?
+
+    override func mouseDown(with event: NSEvent) {
+        if event.modifierFlags.contains(.command) {
+            let row = self.row(at: convert(event.locationInWindow, from: nil))
+            if row >= 0, onCommandClickRow?(row) == true { return }
+        }
+        super.mouseDown(with: event)
+    }
+
+    override func keyDown(with event: NSEvent) {
+        switch event.keyCode {
+        case 36, 76: onReturn?()
+        case 51, 117: onDeleteKey?()
+        case 49 where event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty: onSpace?()
+        default: super.keyDown(with: event)
+        }
+    }
+
+    override func becomeFirstResponder() -> Bool {
+        onFocus?()
+        return super.becomeFirstResponder()
+    }
+}
+
+/// Draws the selection with the design's light blue instead of the system accent.
+final class SelectionRowView: NSTableRowView {
+    override var isEmphasized: Bool {
+        get { false }
+        set {}
+    }
+
+    override func drawSelection(in dirtyRect: NSRect) {
+        guard isSelected else { return }
+        Palette.ns("Selection").setFill()
+        bounds.fill()
+    }
+}
+
+@MainActor
+private enum Symbols {
+    static func image(_ name: String) -> NSImage? {
+        NSImage(systemSymbolName: name, accessibilityDescription: nil)
+    }
+    static let folder = image("folder.fill")
+    static let file = image("doc")
+    static let link = image("link")
+    static let parent = image("arrow.turn.left.up")
+}
+
+final class NameCellView: NSTableCellView {
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        let icon = NSImageView()
+        icon.translatesAutoresizingMaskIntoConstraints = false
+        icon.imageScaling = .scaleProportionallyDown
+        let label = NSTextField(labelWithString: "")
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.lineBreakMode = .byTruncatingMiddle
+        label.font = .systemFont(ofSize: 13)
+        addSubview(icon)
+        addSubview(label)
+        imageView = icon
+        textField = label
+        NSLayoutConstraint.activate([
+            icon.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
+            icon.centerYAnchor.constraint(equalTo: centerYAnchor),
+            icon.widthAnchor.constraint(equalToConstant: 16),
+            icon.heightAnchor.constraint(equalToConstant: 16),
+            label.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 6),
+            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
+            label.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+}
+
+final class TextCellView: NSTableCellView {
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        let label = NSTextField(labelWithString: "")
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.lineBreakMode = .byTruncatingTail
+        addSubview(label)
+        textField = label
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
+            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
+            label.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+}
+
+// MARK: - SwiftUI wrapper
+
+struct FileTableView: NSViewRepresentable {
+    let pane: PaneModel
+    let session: ConnectionSession
+    /// Changes whenever the rows change; SwiftUI calls `updateNSView` when it does.
+    let version: Int
+    let sort: FileSort
+
+    func makeCoordinator() -> FileTableCoordinator {
+        FileTableCoordinator(app: AppModel.shared, pane: pane, session: session)
+    }
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let coordinator = context.coordinator
+        let table = FileNSTableView()
+        coordinator.configure(table)
+        let scroll = NSScrollView()
+        scroll.documentView = table
+        scroll.hasVerticalScroller = true
+        scroll.hasHorizontalScroller = false
+        scroll.drawsBackground = true
+        scroll.backgroundColor = Palette.ns("Ground")
+        scroll.setAccessibilityLabel(pane.side == .local ? "Local files" : "Server files")
+        return scroll
+    }
+
+    func updateNSView(_ scroll: NSScrollView, context: Context) {
+        context.coordinator.update(version: version, sort: sort)
+    }
+}
+
+// MARK: - Coordinator
+
+@MainActor
+final class FileTableCoordinator: NSObject, NSTableViewDataSource, NSTableViewDelegate, NSMenuDelegate {
+    private let app: AppModel
+    private let pane: PaneModel
+    private let session: ConnectionSession
+    private weak var table: FileNSTableView?
+    private var rows: [FileRow] = []
+    private var lastVersion = -1
+    private var suppressSort = false
+
+    private static let nameID = NSUserInterfaceItemIdentifier("name")
+    private static let sizeID = NSUserInterfaceItemIdentifier("size")
+    private static let modifiedID = NSUserInterfaceItemIdentifier("modified")
+    private static let permsID = NSUserInterfaceItemIdentifier("permissions")
+    private static let rowID = NSUserInterfaceItemIdentifier("row")
+
+    init(app: AppModel, pane: PaneModel, session: ConnectionSession) {
+        self.app = app
+        self.pane = pane
+        self.session = session
+    }
+
+    func configure(_ table: FileNSTableView) {
+        self.table = table
+        table.style = .plain
+        table.rowHeight = 22
+        table.allowsMultipleSelection = true
+        table.allowsColumnReordering = false
+        table.usesAlternatingRowBackgroundColors = false
+        table.backgroundColor = Palette.ns("Ground")
+        table.columnAutoresizingStyle = .firstColumnOnlyAutoresizingStyle
+        table.intercellSpacing = NSSize(width: 0, height: 0)
+
+        func column(_ id: NSUserInterfaceItemIdentifier, _ title: String, key: SortKey, width: CGFloat, min: CGFloat) -> NSTableColumn {
+            let c = NSTableColumn(identifier: id)
+            c.title = title
+            c.width = width
+            c.minWidth = min
+            c.sortDescriptorPrototype = NSSortDescriptor(key: key.rawValue, ascending: true)
+            return c
+        }
+        let name = column(Self.nameID, "Name", key: .name, width: 260, min: 110)
+        name.resizingMask = .autoresizingMask
+        let size = column(Self.sizeID, "Size", key: .size, width: 70, min: 56)
+        let modified = column(Self.modifiedID, "Modified", key: .modified, width: 110, min: 100)
+        let perms = column(Self.permsID, "Perms", key: .permissions, width: 84, min: 74)
+        perms.isHidden = pane.side == .local
+        for c in [name, size, modified, perms] { table.addTableColumn(c) }
+
+        table.dataSource = self
+        table.delegate = self
+        table.target = self
+        table.doubleAction = #selector(doubleClicked(_:))
+        table.registerForDraggedTypes([.dockyardItems, .fileURL])
+        table.setDraggingSourceOperationMask([.copy, .move], forLocal: true)
+        table.setDraggingSourceOperationMask(.copy, forLocal: false)
+
+        let menu = NSMenu()
+        menu.delegate = self
+        table.menu = menu
+
+        table.onCommandClickRow = { [weak self] row in self?.commandClick(row) ?? false }
+        table.onReturn = { [weak self] in self?.openSelection() }
+        table.onDeleteKey = { [weak self] in self?.deleteSelection() }
+        table.onSpace = { [weak self] in self?.quickLook() }
+        table.onFocus = { [weak self] in
+            guard let self else { return }
+            self.app.focusedSide = self.pane.side
+            if self.app.layoutMode == .sideBySide || self.app.activeSessionID != self.session.id {
+                self.app.activeSessionID = self.session.id
+            }
+            Task { await self.app.refreshUndoState() }
+        }
+    }
+
+    func update(version: Int, sort: FileSort) {
+        guard let table else { return }
+        if let descriptor = table.sortDescriptors.first, descriptor.key == sort.key.rawValue, descriptor.ascending == sort.ascending {
+            // in sync
+        } else {
+            suppressSort = true
+            table.sortDescriptors = [NSSortDescriptor(key: sort.key.rawValue, ascending: sort.ascending)]
+            suppressSort = false
+        }
+        guard version != lastVersion else { return }
+        lastVersion = version
+        let selected = Set(table.selectedRowIndexes.compactMap { $0 < rows.count ? rows[$0].id : nil })
+        rows = pane.rows
+        table.reloadData()
+        if !selected.isEmpty {
+            var indexes = IndexSet()
+            for (i, row) in rows.enumerated() where selected.contains(row.id) { indexes.insert(i) }
+            table.selectRowIndexes(indexes, byExtendingSelection: false)
+        }
+        pane.selection = selectedRows()
+    }
+
+    private func selectedRows() -> [FileRow] {
+        guard let table else { return [] }
+        return table.selectedRowIndexes.compactMap { $0 < rows.count ? rows[$0] : nil }
+    }
+
+    // MARK: Data source
+
+    func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
+
+    func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
+        if let reused = tableView.makeView(withIdentifier: Self.rowID, owner: self) as? SelectionRowView { return reused }
+        let view = SelectionRowView()
+        view.identifier = Self.rowID
+        return view
+    }
+
+    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        guard let column = tableColumn, row < rows.count else { return nil }
+        let id = column.identifier
+        let fileRow = rows[row]
+        if id == Self.nameID {
+            let cell = (tableView.makeView(withIdentifier: id, owner: self) as? NameCellView) ?? {
+                let c = NameCellView()
+                c.identifier = id
+                return c
+            }()
+            switch fileRow {
+            case .parent:
+                cell.textField?.stringValue = ".."
+                cell.imageView?.image = Symbols.parent
+                cell.imageView?.contentTintColor = .secondaryLabelColor
+            case .item(let item):
+                cell.textField?.stringValue = item.name
+                if item.isDirectory {
+                    cell.imageView?.image = Symbols.folder
+                    cell.imageView?.contentTintColor = .controlAccentColor
+                } else {
+                    cell.imageView?.image = item.isSymlink ? Symbols.link : Symbols.file
+                    cell.imageView?.contentTintColor = .secondaryLabelColor
+                }
+            }
+            return cell
+        }
+        let cell = (tableView.makeView(withIdentifier: id, owner: self) as? TextCellView) ?? {
+            let c = TextCellView()
+            c.identifier = id
+            return c
+        }()
+        var text = ""
+        if case .item(let item) = fileRow {
+            switch id {
+            case Self.sizeID: text = item.isDirectory ? "" : FileDisplay.size(item.size)
+            case Self.modifiedID: text = FileDisplay.modifiedCompact(item.modified)
+            case Self.permsID: text = FileDisplay.permissions(item.permissions)
+            default: break
+            }
+        }
+        cell.textField?.stringValue = text
+        cell.textField?.textColor = .secondaryLabelColor
+        if id == Self.permsID {
+            cell.textField?.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+        } else {
+            cell.textField?.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
+        }
+        cell.textField?.alignment = id == Self.sizeID ? .right : .left
+        return cell
+    }
+
+    func tableViewSelectionDidChange(_ notification: Notification) {
+        pane.selection = selectedRows()
+    }
+
+    func tableView(_ tableView: NSTableView, sortDescriptorsDidChange oldDescriptors: [NSSortDescriptor]) {
+        guard !suppressSort, let descriptor = tableView.sortDescriptors.first,
+              let key = descriptor.key.flatMap(SortKey.init(rawValue:)) else { return }
+        pane.setSort(FileSort(key: key, ascending: descriptor.ascending))
+    }
+
+    // MARK: Opening
+
+    @objc private func doubleClicked(_ sender: Any?) {
+        guard let table, table.clickedRow >= 0, table.clickedRow < rows.count else { return }
+        open(rows[table.clickedRow])
+    }
+
+    private func openSelection() {
+        if let first = selectedRows().first { open(first) }
+    }
+
+    private func open(_ row: FileRow) {
+        switch row {
+        case .parent:
+            pane.goUp()
+        case .item(let item):
+            if item.isDirectory {
+                pane.navigate(to: item.path)
+            } else {
+                openFile(item)
+            }
+        }
+    }
+
+    private func openFile(_ item: RemoteItem) {
+        if pane.side == .local {
+            NSWorkspace.shared.open(URL(fileURLWithPath: item.path))
+            return
+        }
+        app.edits.edit(item, in: session)
+    }
+
+    private func quickLook() {
+        QuickLookCenter.shared.toggle(pane.selectedItems, side: pane.side, session: session)
+    }
+
+    private func commandClick(_ row: Int) -> Bool {
+        guard row < rows.count, case .item(let item) = rows[row], item.isDirectory else { return false }
+        pane.openTab(at: item.path, activate: false)
+        return true
+    }
+
+    // MARK: Drag source
+
+    func tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int) -> NSPasteboardWriting? {
+        guard row < rows.count, case .item(let item) = rows[row] else { return nil }
+        let pasteboardItem = NSPasteboardItem()
+        pasteboardItem.setString(item.path, forType: .dockyardItems)
+        if pane.side == .local {
+            pasteboardItem.setString(URL(fileURLWithPath: item.path).absoluteString, forType: .fileURL)
+        }
+        return pasteboardItem
+    }
+
+    func tableView(_ tableView: NSTableView, draggingSession session: NSDraggingSession, willBeginAt screenPoint: NSPoint, forRowIndexes rowIndexes: IndexSet) {
+        var items: [RemoteItem] = []
+        for index in rowIndexes where index < rows.count {
+            if case .item(let item) = rows[index] { items.append(item) }
+        }
+        DragState.origin = (self.session.id, pane.side)
+        DragState.items = items
+    }
+
+    func tableView(_ tableView: NSTableView, draggingSession session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {
+        DragState.clear()
+    }
+
+    // MARK: Drop target
+
+    private func dropDirectory(row: Int, operation: NSTableView.DropOperation) -> (String, Bool) {
+        if operation == .on, row >= 0, row < rows.count, case .item(let item) = rows[row], item.isDirectory {
+            return (item.path, true)
+        }
+        return (pane.currentPath, false)
+    }
+
+    func tableView(
+        _ tableView: NSTableView, validateDrop info: NSDraggingInfo, proposedRow row: Int,
+        proposedDropOperation dropOperation: NSTableView.DropOperation
+    ) -> NSDragOperation {
+        let (directory, onFolder) = dropDirectory(row: row, operation: dropOperation)
+        if !onFolder { tableView.setDropRow(-1, dropOperation: .on) }
+        return DropHandler.operation(info, pane: pane, session: session, directory: directory)
+    }
+
+    func tableView(
+        _ tableView: NSTableView, acceptDrop info: NSDraggingInfo, row: Int, dropOperation: NSTableView.DropOperation
+    ) -> Bool {
+        let (directory, _) = dropDirectory(row: row, operation: dropOperation)
+        return DropHandler.perform(info, app: app, pane: pane, session: session, directory: directory)
+    }
+
+    // MARK: Context menu
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        menu.removeAllItems()
+        guard let table else { return }
+        let clicked = table.clickedRow
+        if clicked >= 0, !table.selectedRowIndexes.contains(clicked) {
+            table.selectRowIndexes(IndexSet(integer: clicked), byExtendingSelection: false)
+        }
+        let selection = selectedRows()
+        let items = pane.selectedItems
+        let hasSelection = !items.isEmpty
+
+        func add(_ title: String, _ action: Selector, enabled: Bool = true) {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+            item.target = self
+            item.isEnabled = enabled
+            menu.addItem(item)
+        }
+
+        add("Open", #selector(menuOpen), enabled: !selection.isEmpty)
+        add("Quick Look", #selector(menuQuickLook), enabled: items.contains { !$0.isDirectory })
+        if items.count == 1, items[0].isDirectory { add("Open in New Tab", #selector(menuOpenInTab)) }
+        menu.addItem(.separator())
+        if pane.side == .local {
+            add("Upload", #selector(menuTransfer), enabled: hasSelection && session.status.isConnected)
+        } else {
+            add("Download", #selector(menuTransfer), enabled: hasSelection)
+        }
+        menu.addItem(.separator())
+        add("Rename…", #selector(menuRename), enabled: items.count == 1)
+        add("Delete…", #selector(menuDelete), enabled: hasSelection)
+        add("New Folder…", #selector(menuNewFolder))
+        menu.addItem(.separator())
+        let canExtract = items.count == 1 && !items[0].isDirectory && ArchiveFormat.detect(fileName: items[0].name) != nil
+        add("Compress\u{2026}", #selector(menuCompress), enabled: hasSelection)
+        add("Extract Here", #selector(menuExtractHere), enabled: canExtract)
+        add("Extract to\u{2026}", #selector(menuExtractTo), enabled: canExtract)
+        menu.addItem(.separator())
+        add("Copy Path", #selector(menuCopyPath), enabled: hasSelection)
+        if pane.side == .server {
+            let mapped = (hasSelection ? items.map(\.path) : [pane.currentPath])
+                .contains { app.webURL(for: $0, on: session.connection) != nil }
+            add("Copy Web URL", #selector(menuCopyWebURL), enabled: mapped)
+            add("Open in Browser", #selector(menuOpenInBrowser), enabled: mapped && items.count <= 1)
+            add(WebURLResolver.mapping(for: webFolder, in: session.connection.webURLs) == nil ? "Set Web URL for Folder\u{2026}" : "Edit Web URL\u{2026}",
+                #selector(menuSetWebURL))
+            menu.addItem(.separator())
+            add("Permissions…", #selector(menuChmod), enabled: hasSelection)
+            let folder = items.count == 1 && items[0].isDirectory ? items[0].path : pane.currentPath
+            let pinned = app.safety.isPinned(folder, on: session.connection.id)
+            add(pinned ? "Unpin Folder" : "Pin Folder", #selector(menuPin))
+            add("Search This Folder\u{2026}", #selector(menuSearch))
+            add("Versions\u{2026}", #selector(menuVersions), enabled: session.status.isConnected)
+        }
+        add("Refresh", #selector(menuRefresh))
+    }
+
+    @objc private func menuOpen() { openSelection() }
+
+    @objc private func menuQuickLook() { quickLook() }
+
+    @objc private func menuOpenInTab() {
+        if let item = pane.selectedItems.first { pane.openTab(at: item.path, activate: false) }
+    }
+
+    @objc private func menuTransfer() {
+        let items = pane.selectedItems
+        if pane.side == .local {
+            guard let server = session.server else { return }
+            app.transfer(items, from: session, .local, to: session, .server, directory: server.currentPath, move: false, conflict: nil)
+        } else {
+            guard let local = session.local else { return }
+            app.transfer(items, from: session, .server, to: session, .local, directory: local.currentPath, move: false, conflict: nil)
+        }
+    }
+
+    @objc private func menuPin() {
+        let items = pane.selectedItems
+        let folder = items.count == 1 && items[0].isDirectory ? items[0].path : pane.currentPath
+        app.safety.togglePin(folder, on: session.connection.id)
+    }
+
+    @objc private func menuSearch() { app.openSearch() }
+
+    @objc private func menuVersions() { app.showVersions(for: session) }
+
+    @objc private func menuCompress() {
+        app.archives.compress(pane.selectedItems, in: session, side: pane.side, app: app)
+    }
+
+    @objc private func menuExtractHere() {
+        guard let item = pane.selectedItems.first else { return }
+        app.archives.extract(item, in: session, side: pane.side, to: nil, app: app)
+    }
+
+    @objc private func menuExtractTo() {
+        guard let item = pane.selectedItems.first else { return }
+        let destination: String?
+        let relays = ArchiveCenter.relays(pane)
+        if pane.side == .local {
+            destination = Dialogs.chooseFile(directory: URL(fileURLWithPath: pane.currentPath), canChooseDirectories: true)?.path
+        } else {
+            var message = "Folder on \(session.connection.name)"
+            if relays { message += "\n\n" + ArchiveCenter.extractRelayNote(session) }
+            destination = Dialogs.promptText(title: "Extract to", message: message, initial: pane.currentPath, confirm: "Extract")
+        }
+        guard let destination, !destination.isEmpty else { return }
+        app.archives.extract(item, in: session, side: pane.side, to: destination, relayConfirmed: relays, app: app)
+    }
+
+    @objc private func menuRename() {
+        guard let item = pane.selectedItems.first,
+              let name = Dialogs.promptText(title: "Rename", message: "New name for \(item.name)", initial: item.name, confirm: "Rename")
+        else { return }
+        let session = self.session, side = pane.side
+        Task { await session.rename(item, to: name, in: side) }
+    }
+
+    private func deleteSelection() { menuDelete() }
+
+    @objc private func menuDelete() {
+        let items = pane.selectedItems
+        guard !items.isEmpty else { return }
+        let what = items.count == 1 ? "\"\(items[0].name)\"" : "\(items.count) items"
+        // PROD sites ask in their own confirmation; asking here as well would be two dialogs for one delete.
+        let asksOnProd = session.asksBeforeRunning(.delete, paths: items.map(\.path), side: pane.side)
+        guard asksOnProd || Dialogs.confirm(
+            title: "Delete \(what)?",
+            message: pane.side == .local ? "The items are moved to the Trash." : "The items are deleted from the server and cannot be recovered.",
+            confirm: "Delete") else { return }
+        let session = self.session, side = pane.side
+        Task { await session.delete(items, in: side) }
+    }
+
+    @objc private func menuNewFolder() {
+        guard let name = Dialogs.promptText(title: "New Folder", message: "Name of the new folder in \(pane.currentPath)", confirm: "Create"),
+              !name.isEmpty else { return }
+        let session = self.session, side = pane.side
+        Task { await session.createFolder(named: name, in: side) }
+    }
+
+    @objc private func menuCopyPath() {
+        Dialogs.copyToPasteboard(pane.selectedItems.map(\.path).joined(separator: "\n"))
+    }
+
+    /// The folder a web URL would be assigned to: the selected folder, else the current one.
+    private var webFolder: String {
+        let items = pane.selectedItems
+        return items.count == 1 && items[0].isDirectory ? items[0].path : pane.currentPath
+    }
+
+    @objc private func menuCopyWebURL() {
+        let items = pane.selectedItems
+        app.copyWebURLs(items.isEmpty ? [pane.currentPath] : items.map(\.path), folder: webFolder, in: session)
+    }
+
+    @objc private func menuOpenInBrowser() {
+        app.openInBrowser(pane.selectedItems.first?.path ?? pane.currentPath, in: session)
+    }
+
+    @objc private func menuSetWebURL() { app.editWebURL(at: webFolder, in: session) }
+
+    @objc private func menuChmod() {
+        let items = pane.selectedItems
+        guard !items.isEmpty else { return }
+        let initial = FileDisplay.octal(items[0].permissions)
+        guard let text = Dialogs.promptText(
+            title: "Permissions", message: "Octal mode, for example 644 or 755", initial: initial, confirm: "Apply"),
+            let mode = FileDisplay.parseOctal(text) else { return }
+        let session = self.session, side = pane.side
+        Task { await session.chmod(items, mode: mode, in: side) }
+    }
+
+    @objc private func menuRefresh() {
+        pane.invalidate()
+        pane.reload()
+    }
+}

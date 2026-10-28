@@ -1,0 +1,150 @@
+name: Dockyard
+options:
+  bundleIdPrefix: app.dockyard
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
+    ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+packages:
+  DockyardCore:
+    path: ../Packages/DockyardCore
+  ConnectionKit:
+    path: ../Packages/ConnectionKit
+  RcloneKit:
+    path: ../Packages/RcloneKit
+  SwiftTerm:
+    path: ThirdParty/SwiftTerm
+  Sparkle:
+    path: ThirdParty/Sparkle
+targets:
+  Dockyard:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources
+      - path: Shared
+      - path: Resources
+        excludes:
+          - Info.plist
+          - Dockyard.entitlements
+    dependencies:
+      - package: DockyardCore
+        product: DockyardCore
+      - package: ConnectionKit
+        product: ConnectionKit
+      - package: RcloneKit
+        product: RcloneKit
+      - package: SwiftTerm
+        product: SwiftTerm
+      - package: Sparkle
+        product: Sparkle
+      - target: DockyardFinder
+        embed: true
+    info:
+      path: Resources/Info.plist
+      properties:
+        CFBundleDisplayName: Dockyard
+        CFBundleShortVersionString: "1.0.0"
+        CFBundleVersion: "1"
+        LSMinimumSystemVersion: "14.0"
+        LSApplicationCategoryType: public.app-category.developer-tools
+        NSHumanReadableCopyright: "Copyright Dockyard"
+        # The appcast is attached to each GitHub release; the private key is in the release machine's Keychain (docs/app.md).
+        SUFeedURL: https://github.com/jeremyhaber/Dockyard/releases/latest/download/appcast.xml
+        SUPublicEDKey: tr43+0i3J4OaAh2e2RgP/4IqkbUGUimkHfatQulpMT8=
+        SUEnableAutomaticChecks: true
+        UTExportedTypeDeclarations:
+          - UTTypeIdentifier: app.dockyard.export
+            UTTypeDescription: Dockyard connection export
+            UTTypeConformsTo: [public.data]
+            UTTypeTagSpecification:
+              public.filename-extension: [dockyardexport]
+              public.mime-type: application/vnd.dockyard.export
+          - UTTypeIdentifier: app.dockyard.session
+            UTTypeDescription: Dockyard connection tab
+            UTTypeConformsTo: [public.data]
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: Dockyard connection export
+            CFBundleTypeRole: Editor
+            LSHandlerRank: Owner
+            LSItemContentTypes: [app.dockyard.export]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.dockyard.mac
+        PRODUCT_NAME: Dockyard
+        GENERATE_INFOPLIST_FILE: NO
+        CODE_SIGN_ENTITLEMENTS: Resources/Dockyard.entitlements
+        ENABLE_HARDENED_RUNTIME: NO
+        COMBINE_HIDPI_IMAGES: YES
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    postCompileScripts:
+      - name: Embed librclone if present
+        basedOnDependencyAnalysis: false
+        script: |
+          # librclone is built by scripts/build-librclone.sh into build/librclone. Optional: without it the
+          # app runs and cloud protocols report that the rclone library is not bundled.
+          SRC="${SRCROOT}/../build/librclone/librclone.dylib"
+          DEST="${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}"
+          if [ -f "$SRC" ]; then
+            mkdir -p "$DEST"
+            cp -f "$SRC" "$DEST/librclone.dylib"
+            IDENTITY="${EXPANDED_CODE_SIGN_IDENTITY:-}"
+            if [ -n "$IDENTITY" ] && [ "$CODE_SIGNING_ALLOWED" != "NO" ]; then
+              codesign --force --sign "$IDENTITY" "$DEST/librclone.dylib" || true
+            fi
+            echo "Embedded librclone.dylib"
+          else
+            echo "note: librclone.dylib not found at $SRC, skipping (run scripts/build-librclone.sh to bundle it)"
+          fi
+  DockyardFinder:
+    type: app-extension
+    platform: macOS
+    sources:
+      - path: FileProvider
+        excludes:
+          - Info.plist
+          - DockyardFinder.entitlements
+      - path: Shared
+    dependencies:
+      - package: DockyardCore
+        product: DockyardCore
+      - package: ConnectionKit
+        product: ConnectionKit
+      - package: RcloneKit
+        product: RcloneKit
+    info:
+      path: FileProvider/Info.plist
+      properties:
+        CFBundleDisplayName: Dockyard Finder
+        CFBundleShortVersionString: "1.0.0"
+        CFBundleVersion: "1"
+        LSMinimumSystemVersion: "14.0"
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.fileprovider-nonui
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).FileProviderExtension
+          NSExtensionFileProviderDocumentGroup: group.app.dockyard.mac
+          NSExtensionFileProviderSupportsEnumeration: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.dockyard.mac.finder
+        PRODUCT_NAME: DockyardFinder
+        GENERATE_INFOPLIST_FILE: NO
+        CODE_SIGN_ENTITLEMENTS: FileProvider/DockyardFinder.entitlements
+        ENABLE_HARDENED_RUNTIME: NO
+        SKIP_INSTALL: YES
+schemes:
+  Dockyard:
+    build:
+      targets:
+        Dockyard: all
+    run:
+      config: Debug
+    test:
+      config: Debug

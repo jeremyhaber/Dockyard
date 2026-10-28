@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>NSWindow Frame TransmitMainWindow</key>
+	<string>100 100 1200 800 0 0 1920 1055 </string>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>FavoriteCollections</key>
+	<array>
+		<dict>
+			<key>name</key>
+			<string>Clients</string>
+			<key>Favorites</key>
+			<array>
+				<dict>
+					<key>nickname</key>
+					<string>Acme Production</string>
+					<key>server</key>
+					<string>ftp.acme.example</string>
+					<key>username</key>
+					<string>acme_web</string>
+					<key>port</key>
+					<integer>22</integer>
+					<key>protocol</key>
+					<string>SFTP</string>
+					<key>path</key>
+					<string>/home/acme_web/public_html</string>
+				</dict>
+				<dict>
+					<key>name</key>
+					<string>Acme Legacy</string>
+					<key>Favorites</key>
+					<array>
+						<dict>
+							<key>nickname</key>
+							<string>Acme FTP over TLS</string>
+							<key>server</key>
+							<string>old.acme.example</string>
+							<key>username</key>
+							<string>acme_old</string>
+							<key>port</key>
+							<string>21</string>
+							<key>protocol</key>
+							<string>FTPTLS</string>
+						</dict>
+					</array>
+				</dict>
+			</array>
+		</dict>
+		<dict>
+			<key>name</key>
+			<string>Personal</string>
+			<key>Favorites</key>
+			<array>
+				<dict>
+					<key>nickname</key>
+					<string>Home server</string>
+					<key>server</key>
+					<string>192.168.1.20</string>
+					<key>username</key>
+					<string>jeremy</string>
+					<key>protocol</key>
+					<string>SFTP</string>
+					<key>keyPath</key>
+					<string>~/.ssh/id_rsa</string>
+					<key>notes</key>
+					<string>NAS</string>
+				</dict>
+				<dict>
+					<key>nickname</key>
+					<string>Photos on S3</string>
+					<key>server</key>
+					<string>s3.amazonaws.com</string>
+					<key>username</key>
+					<string>AKIAEXAMPLE</string>
+					<key>protocol</key>
+					<string>S3</string>
+				</dict>
+				<dict>
+					<key>nickname</key>
+					<string>Public FTP</string>
+					<key>server</key>
+					<string>ftp.public.example</string>
+					<key>protocol</key>
+					<string>FTP</string>
+				</dict>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>

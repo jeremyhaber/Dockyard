@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024"><g><defs>
+<linearGradient id="Abg" x1="0" y1="0" x2="0.3" y2="1"><stop offset="0" stop-color="#4A6CFF"/><stop offset="1" stop-color="#1B2E9E"/></linearGradient>
+<linearGradient id="Aglass" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity="0.98"/><stop offset="1" stop-color="#fff" stop-opacity="0.78"/></linearGradient>
+<linearGradient id="Aglass2" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity="0.55"/><stop offset="1" stop-color="#fff" stop-opacity="0.25"/></linearGradient>
+<linearGradient id="Arim" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity="0.9"/><stop offset="0.4" stop-color="#fff" stop-opacity="0.1"/></linearGradient>
+<radialGradient id="Aglow" cx="0.3" cy="0.15" r="0.9"><stop offset="0" stop-color="#fff" stop-opacity="0.28"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient>
+<filter id="Ash" x="-30%" y="-30%" width="160%" height="170%"><feDropShadow dx="0" dy="18" stdDeviation="22" flood-color="#001a4d" flood-opacity="0.35"/></filter>
+<filter id="Aosh" x="-10%" y="-10%" width="120%" height="130%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#000" flood-opacity="0.25"/></filter>
+<clipPath id="Aclip"><rect x="100" y="100" width="824" height="824" rx="185"/></clipPath>
+</defs>
+<rect x="100" y="100" width="824" height="824" rx="185" fill="url(#Abg)" filter="url(#Aosh)"/>
+<g clip-path="url(#Aclip)"><rect x="100" y="100" width="824" height="824" fill="url(#Aglow)"/><g transform="translate(512 512) scale(0.92) translate(-512 -491)">
+<g filter="url(#Ash)"><rect x="262" y="690" width="500" height="150" rx="40" fill="#fff" fill-opacity="0.32"/>
+<rect x="262" y="690" width="500" height="150" rx="40" fill="none" stroke="#fff" stroke-opacity="0.7" stroke-width="4"/>
+<circle cx="336" cy="765" r="22" fill="#3BE38A"/><circle cx="336" cy="765" r="34" fill="#3BE38A" fill-opacity="0.25"/>
+<rect x="390" y="754" width="90" height="22" rx="11" fill="#fff" fill-opacity="0.5"/><rect x="520" y="742" width="14" height="46" rx="7" fill="#fff" fill-opacity="0.55"/><rect x="554" y="742" width="14" height="46" rx="7" fill="#fff" fill-opacity="0.55"/><rect x="588" y="742" width="14" height="46" rx="7" fill="#fff" fill-opacity="0.55"/><rect x="622" y="742" width="14" height="46" rx="7" fill="#fff" fill-opacity="0.55"/><rect x="656" y="742" width="14" height="46" rx="7" fill="#fff" fill-opacity="0.55"/><rect x="690" y="742" width="14" height="46" rx="7" fill="#fff" fill-opacity="0.55"/><rect x="262" y="520" width="500" height="150" rx="40" fill="#fff" fill-opacity="0.5"/>
+<rect x="262" y="520" width="500" height="150" rx="40" fill="none" stroke="#fff" stroke-opacity="0.7" stroke-width="4"/>
+<circle cx="336" cy="595" r="22" fill="#3BE38A"/><circle cx="336" cy="595" r="34" fill="#3BE38A" fill-opacity="0.25"/>
+<rect x="390" y="584" width="90" height="22" rx="11" fill="#fff" fill-opacity="0.5"/><rect x="520" y="572" width="14" height="46" rx="7" fill="#fff" fill-opacity="0.55"/><rect x="554" y="572" width="14" height="46" rx="7" fill="#fff" fill-opacity="0.55"/><rect x="588" y="572" width="14" height="46" rx="7" fill="#fff" fill-opacity="0.55"/><rect x="622" y="572" width="14" height="46" rx="7" fill="#fff" fill-opacity="0.55"/><rect x="656" y="572" width="14" height="46" rx="7" fill="#fff" fill-opacity="0.55"/><rect x="690" y="572" width="14" height="46" rx="7" fill="#fff" fill-opacity="0.55"/><g transform="rotate(-6 512 405)">
+<rect x="262.0" y="330" width="500" height="150" rx="40" fill="#fff" fill-opacity="0.97"/>
+<g stroke="#2F6FE0" stroke-width="22" stroke-linecap="round" opacity="0.35"><path d="M340 370 v70"/><path d="M400 370 v70"/><path d="M460 370 v70"/><path d="M520 370 v70"/><path d="M580 370 v70"/><path d="M640 370 v70"/><path d="M700 370 v70"/></g></g></g>
+<path d="M432 262 L512 198 L592 262" fill="none" stroke="#fff" stroke-width="42" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M452 186 L512 138 L572 186" fill="none" stroke="#fff" stroke-opacity="0.5" stroke-width="34" stroke-linecap="round" stroke-linejoin="round"/></g></g>
+<rect x="102" y="102" width="820" height="820" rx="183" fill="none" stroke="url(#Arim)" stroke-width="4" opacity="0.6"/></g></svg>

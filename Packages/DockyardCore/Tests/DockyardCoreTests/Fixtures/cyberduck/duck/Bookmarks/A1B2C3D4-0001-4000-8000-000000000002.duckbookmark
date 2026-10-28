@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Protocol</key>
+	<string>ftp</string>
+	<key>UUID</key>
+	<string>A1B2C3D4-0001-4000-8000-000000000002</string>
+	<key>Hostname</key>
+	<string>mirror.globex.example</string>
+	<key>Port</key>
+	<string>21</string>
+	<key>Nickname</key>
+	<string>Globex public mirror</string>
+	<key>Path</key>
+	<string>/</string>
+	<key>Anonymous Configured</key>
+	<true/>
+</dict>
+</plist>

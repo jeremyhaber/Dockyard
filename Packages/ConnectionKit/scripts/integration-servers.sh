@@ -9,20 +9,31 @@ PKG_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 STATE_DIR="$PKG_DIR/.integration"
 KEY_DIR="$STATE_DIR/keys"
 
-SSH_PORT=2222
+SSH_PORT=2222        # publickey or password
+SSH_BOTH_PORT=2223   # AuthenticationMethods publickey,password
+SSH_KBD_PORT=2224    # keyboard-interactive only
+SSH_SLOW_PORT=2225   # proxy to 2222 adding 40 ms round trip (scripts/latency-proxy.py)
 FTP_PORT=2121        # pure-ftpd: MLSD, explicit TLS, EPSV
 FTP_LIST_PORT=2122   # vsftpd: no MLSD, exercises the LIST fallback
+FTP_LIMITED_PORT=2123 # pure-ftpd allowing 2 connections per client: exercises the queue's back-off
 USER_NAME=dockyard
 USER_PASS=dockyard-test-pw
 KEY_PASSPHRASE=dockyard-key-pw
+ROOT_PASS=root-test-pw
 
-SSH_IMAGE=linuxserver/openssh-server:latest
+SSH_IMAGE=dockyard-test-sshd:latest
 FTP_IMAGE=stilliard/pure-ftpd:latest
 VSFTPD_IMAGE=fauria/vsftpd:latest
 
-containers=(dockyard-test-sftp dockyard-test-ftp dockyard-test-vsftpd)
+# Jump host topology: the host reaches only dockyard-test-sftp. inner-sshd lives on an internal network shared
+# with it, and deep-sshd on a second internal network shared only with inner-sshd. Neither publishes a port.
+NET_INNER=dockyard-test-inner1
+NET_DEEP=dockyard-test-inner2
+
+containers=(dockyard-test-sftp dockyard-test-ftp dockyard-test-vsftpd dockyard-test-ftp-limited dockyard-test-inner dockyard-test-deep)
 
 up() {
+  docker build --network host -q -t "$SSH_IMAGE" -f "$PKG_DIR/scripts/Dockerfile.sshd" "$PKG_DIR/scripts" >/dev/null
   mkdir -p "$KEY_DIR"
   chmod 700 "$KEY_DIR"
   keygen() { # file name, passphrase, ssh-keygen type args...
@@ -33,6 +44,12 @@ up() {
   keygen id_ed25519 "" -t ed25519
   keygen id_ed25519_enc "$KEY_PASSPHRASE" -t ed25519
   keygen id_rsa "" -t rsa -b 3072
+  keygen id_rsa_pem "" -t rsa -b 3072 -m PEM
+  keygen id_rsa_pem_enc "$KEY_PASSPHRASE" -t rsa -b 3072 -m PEM
+  keygen id_rsa_pkcs8 "" -t rsa -b 3072 -m PKCS8
+  keygen id_ecdsa "" -t ecdsa -b 256
+  keygen id_ecdsa_384_pem "" -t ecdsa -b 384 -m PEM
+  keygen id_ed25519_pkcs8 "" -t ed25519 -m PKCS8
   docker run --rm --entrypoint chown -v "$KEY_DIR:/keys" "$SSH_IMAGE" -R "$(id -u):$(id -g)" /keys
   if [ ! -f "$KEY_DIR/pure-ftpd.pem" ]; then
     openssl req -x509 -nodes -newkey rsa:2048 -days 30 -subj "/CN=localhost" \
@@ -44,10 +61,17 @@ up() {
   down >/dev/null 2>&1 || true
 
   local pubkeys
-  pubkeys="$(cat "$KEY_DIR/id_ed25519.pub" "$KEY_DIR/id_ed25519_enc.pub" "$KEY_DIR/id_rsa.pub")"
-  docker run -d --name dockyard-test-sftp -p "127.0.0.1:$SSH_PORT:2222" \
-    -e PUID=1000 -e PGID=1000 -e USER_NAME="$USER_NAME" -e USER_PASSWORD="$USER_PASS" \
-    -e PASSWORD_ACCESS=true -e PUBLIC_KEY="$pubkeys" "$SSH_IMAGE" >/dev/null
+  pubkeys="$(cat "$KEY_DIR"/*.pub)"
+  docker run -d --name dockyard-test-sftp -e PUBLIC_KEY="$pubkeys" \
+    -p "127.0.0.1:$SSH_PORT:2222" -p "127.0.0.1:$SSH_BOTH_PORT:2223" -p "127.0.0.1:$SSH_KBD_PORT:2224" \
+    "$SSH_IMAGE" >/dev/null
+
+  docker network create --internal "$NET_INNER" >/dev/null
+  docker network create --internal "$NET_DEEP" >/dev/null
+  docker network connect "$NET_INNER" dockyard-test-sftp
+  docker run -d --name dockyard-test-inner -e PUBLIC_KEY="$pubkeys" --network "$NET_INNER" --network-alias inner-sshd "$SSH_IMAGE" >/dev/null
+  docker network connect --alias inner-sshd "$NET_DEEP" dockyard-test-inner
+  docker run -d --name dockyard-test-deep -e PUBLIC_KEY="$pubkeys" --network "$NET_DEEP" --network-alias deep-sshd "$SSH_IMAGE" >/dev/null
 
   docker run -d --name dockyard-test-ftp -p "127.0.0.1:$FTP_PORT:21" -p 127.0.0.1:30000-30009:30000-30009 \
     -e PUBLICHOST=127.0.0.1 -e FTP_USER_NAME="$USER_NAME" -e FTP_USER_PASS="$USER_PASS" \
@@ -56,13 +80,26 @@ up() {
     -e ADDED_FLAGS="--tls=1" "$FTP_IMAGE" \
     /run.sh -c 5 -C 5 -l puredb:/etc/pure-ftpd/pureftpd.pdb -E -j >/dev/null  # image default minus -R, which blocks chmod
 
+  docker run -d --name dockyard-test-ftp-limited -p "127.0.0.1:$FTP_LIMITED_PORT:21" -p 127.0.0.1:30200-30209:30200-30209 \
+    -e PUBLICHOST=127.0.0.1 -e FTP_USER_NAME="$USER_NAME" -e FTP_USER_PASS="$USER_PASS" \
+    -e FTP_USER_HOME=/home/dockyard -e FTP_PASSIVE_PORTS=30200:30209 \
+    "$FTP_IMAGE" /run.sh -c 2 -C 2 -l puredb:/etc/pure-ftpd/pureftpd.pdb -E -j >/dev/null
+
   docker run -d --name dockyard-test-vsftpd -p "127.0.0.1:$FTP_LIST_PORT:21" -p 127.0.0.1:30100-30109:30100-30109 \
     -e FTP_USER="$USER_NAME" -e FTP_PASS="$USER_PASS" -e PASV_ADDRESS=127.0.0.1 \
     -e PASV_MIN_PORT=30100 -e PASV_MAX_PORT=30109 -e LOG_STDOUT=1 "$VSFTPD_IMAGE" >/dev/null
 
   wait_for_port "$SSH_PORT" SSH
+  wait_for_port "$SSH_BOTH_PORT" "SSH (two factors)"
+  wait_for_port "$SSH_KBD_PORT" "SSH (keyboard-interactive)"
+  nohup python3 "$PKG_DIR/scripts/latency-proxy.py" "$SSH_SLOW_PORT" "$SSH_PORT" 20 >/dev/null 2>&1 &
+  echo $! > "$STATE_DIR/latency-proxy.pid"
+  wait_for_port "$SSH_SLOW_PORT" "latency proxy"
+  wait_for_container_ssh dockyard-test-inner
+  wait_for_container_ssh dockyard-test-deep
   wait_for_port "$FTP_PORT" FTP
   wait_for_port "$FTP_LIST_PORT" vsftpd
+  wait_for_port "$FTP_LIMITED_PORT" "pure-ftpd (limited)"
   echo "Servers are up. Run: DOCKYARD_INTEGRATION=1 swift test"
 }
 
@@ -75,8 +112,19 @@ wait_for_port() {
   return 1
 }
 
+wait_for_container_ssh() {
+  for _ in $(seq 1 60); do
+    docker exec "$1" bash -c 'exec 3<>/dev/tcp/127.0.0.1/2222' 2>/dev/null && return 0
+    sleep 1
+  done
+  echo "Timed out waiting for sshd in $1" >&2
+  return 1
+}
+
 down() {
+  if [ -f "$STATE_DIR/latency-proxy.pid" ]; then kill "$(cat "$STATE_DIR/latency-proxy.pid")" 2>/dev/null || true; rm -f "$STATE_DIR/latency-proxy.pid"; fi
   docker rm -f "${containers[@]}" >/dev/null 2>&1 || true
+  docker network rm "$NET_INNER" "$NET_DEEP" >/dev/null 2>&1 || true
   echo "Servers stopped."
 }
 
