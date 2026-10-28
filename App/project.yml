@@ -56,7 +56,7 @@ targets:
         LSMinimumSystemVersion: "14.0"
         LSApplicationCategoryType: public.app-category.developer-tools
         NSHumanReadableCopyright: "Copyright Dockyard"
-        # The appcast is attached to each GitHub release; the private key is in the release machine's Keychain (docs/app.md).
+        # The appcast is attached to each GitHub release; the private key is in the release machine's Keychain (docs/internal/app.md).
         SUFeedURL: https://github.com/jeremyhaber/Dockyard/releases/latest/download/appcast.xml
         SUPublicEDKey: tr43+0i3J4OaAh2e2RgP/4IqkbUGUimkHfatQulpMT8=
         SUEnableAutomaticChecks: true

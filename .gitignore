@@ -22,3 +22,6 @@ App/FileProvider/Info.plist
 
 # Local SSH keys used for testing
 App/id_*
+
+# Private docs (jeremyhaber/dockyard-docs), cloned locally
+docs/internal/

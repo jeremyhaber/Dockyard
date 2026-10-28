@@ -1,7 +1,7 @@
 import Foundation
 import Security
 
-/// Identifiers and locations shared by the app and the Finder extension (docs/app.md, "Finder mount").
+/// Identifiers and locations shared by the app and the Finder extension (docs/internal/app.md, "Finder mount").
 enum AppGroup {
     static let identifier = "group.app.dockyard.mac"
     /// The keychain access group without its team prefix; the signed entitlement is `<TEAMID>.app.dockyard.mac.shared`.

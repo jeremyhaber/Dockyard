@@ -10,7 +10,7 @@
 #   plus the generated librclone.h and VERSION.
 #
 # Requires Go (>= 1.24) and a C toolchain (clang on macOS, gcc on Linux).
-# See docs/rclone.md for how the app embeds the result.
+# See docs/internal/rclone.md for how the app embeds the result.
 set -euo pipefail
 
 RCLONE_VERSION="${RCLONE_VERSION:-v1.70.3}"

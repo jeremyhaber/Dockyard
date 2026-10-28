@@ -8,7 +8,7 @@ import GRDB
 /// site, and the jobs that are running. Folders expand lazily: a folder is one job whose listing inserts
 /// children in batches while workers already transfer the first ones. A scheduler picks work round-robin
 /// across sites, bounded by each site's live connection limit, its connect delay and a global cap, and
-/// sessions come from a per-site pool. See `docs/HANDOFF.md` section 10.
+/// sessions come from a per-site pool. See `docs/internal/HANDOFF.md` section 10.
 public actor TransferQueue {
     // MARK: Configuration
 

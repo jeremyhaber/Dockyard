@@ -45,26 +45,11 @@ brew install xcodegen
 cd App && xcodegen && open Dockyard.xcodeproj
 ```
 
-Run with `-DockyardDemo YES` to start with sample data and no network access. See [docs/app.md](docs/app.md) for the app layout, signing, the Finder extension and releases.
+Run with `-DockyardDemo YES` to start with sample data and no network access.
 
 To regenerate the screenshots, build the app and run `RUNNER_TEMP=$(mktemp -d) scripts/ci/screenshots.sh <path to Dockyard.app> <output dir>`. The tabs animation is a scripted mock of the window rather than a recording; see `scripts/readme-animation/capture.mjs` to re-render it.
 
 ## Docs
 
-- [docs/HANDOFF.md](docs/HANDOFF.md): the full spec
 - [docs/whm.md](docs/whm.md): setting up a WHM server and key login for its accounts
-- [docs/app.md](docs/app.md): app architecture and release steps
-- [docs/rclone.md](docs/rclone.md): cloud backends
 - [docs/onepassword.md](docs/onepassword.md): 1Password setup
-- [docs/phase0-findings.md](docs/phase0-findings.md): library decisions
-
-## About
-
-<a href="https://simplistics.ca">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/images/simplistics-logo-white.png">
-    <img src="docs/images/simplistics-logo.png" alt="Simplistics Web Design Inc." width="200">
-  </picture>
-</a>
-
-Made by Jeremy Haber, one of the owners of [Simplistics Web Design Inc.](https://simplistics.ca), a web design studio in Toronto. We built Dockyard for our own day-to-day agency work, because we wanted a modern FTP/SFTP client and couldn't find one we liked.
