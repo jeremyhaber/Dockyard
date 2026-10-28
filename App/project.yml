@@ -67,6 +67,9 @@ targets:
             UTTypeTagSpecification:
               public.filename-extension: [dockyardexport]
               public.mime-type: application/vnd.dockyard.export
+          - UTTypeIdentifier: app.dockyard.session
+            UTTypeDescription: Dockyard connection tab
+            UTTypeConformsTo: [public.data]
         CFBundleDocumentTypes:
           - CFBundleTypeName: Dockyard connection export
             CFBundleTypeRole: Editor
@@ -80,6 +83,7 @@ targets:
         CODE_SIGN_ENTITLEMENTS: Resources/Dockyard.entitlements
         ENABLE_HARDENED_RUNTIME: NO
         COMBINE_HIDPI_IMAGES: YES
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     postCompileScripts:
       - name: Embed librclone if present
         basedOnDependencyAnalysis: false

@@ -149,10 +149,10 @@ struct AppCommands: Commands {
             .keyboardShortcut(".", modifiers: [.command, .shift])
             .disabled(pane == nil)
             Divider()
-            Button(model.layoutMode == .sideBySide ? "Show Local + Server" : "Show Servers Side by Side") {
-                model.setLayout(model.layoutMode == .sideBySide ? .localServer : .sideBySide)
+            Button(model.sidebarCollapsed ? "Keep Sidebar Open" : "Collapse Sidebar to Icons") {
+                withAnimation(.easeOut(duration: 0.15)) { model.sidebarCollapsed.toggle() }
             }
-            .keyboardShortcut("s", modifiers: [.command, .option])
+            .keyboardShortcut("s", modifiers: [.command, .control])
             Button("Compare and Sync\u{2026}") { model.compareVisible = true }
                 .keyboardShortcut("y", modifiers: [.command, .shift])
                 .disabled(model.activeSession?.status.isConnected != true)

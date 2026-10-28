@@ -17,8 +17,7 @@ struct MainWindow: View {
             QuickConnectBar()
             Divider()
             HStack(spacing: 0) {
-                SidebarView()
-                    .frame(width: 210)
+                SidebarHost()
                 Divider()
                 VStack(spacing: 0) {
                     WorkArea()
@@ -57,6 +56,7 @@ struct MainWindow: View {
             if let session = app.activeSession { CompareSheet(session: session) }
         }
         .sheet(item: versionsBinding) { session in VersionsSheet(session: session) }
+        .sheet(item: webURLBinding) { request in WebURLRequestSheet(request: request) }
         .background(WindowAccessor { window in DemoWindows.register("main", window) })
         .frame(minWidth: 980, minHeight: 620)
         .task {
@@ -69,6 +69,10 @@ struct MainWindow: View {
 
     private var versionsBinding: Binding<ConnectionSession?> {
         Binding(get: { app.versionsSession }, set: { if $0 == nil { app.safety.versionsSessionID = nil } })
+    }
+
+    private var webURLBinding: Binding<WebURLRequest?> {
+        Binding(get: { app.webURLRequest }, set: { app.webURLRequest = $0 })
     }
 
     private var compareBinding: Binding<Bool> {
@@ -122,17 +126,6 @@ struct MainToolbar: ToolbarContent {
             }
             .help("Jump to a site or recent folder (\u{2318}K)")
 
-            Picker("Layout", selection: layoutBinding) {
-                Image(systemName: "rectangle.split.2x1")
-                    .accessibilityLabel("Local and server")
-                    .tag(LayoutMode.localServer)
-                Image(systemName: "rectangle.split.3x1")
-                    .accessibilityLabel("Servers side by side")
-                    .tag(LayoutMode.sideBySide)
-            }
-            .pickerStyle(.segmented)
-            .help("Switch between Local + server and Servers side by side")
-
             Button {
                 app.compareVisible = true
             } label: {
@@ -141,7 +134,7 @@ struct MainToolbar: ToolbarContent {
             .disabled(!canCompare)
             .help("Compare the local and server folders of the active tabs")
 
-            if let connection = app.activeSession?.connection {
+            if AppGroup.mountingAvailable, let connection = app.activeSession?.connection {
                 Button {
                     app.setMounted(connection, !connection.mountInFinder)
                 } label: {
@@ -181,10 +174,6 @@ struct MainToolbar: ToolbarContent {
         }
     }
 
-    private var layoutBinding: Binding<LayoutMode> {
-        Binding(get: { app.layoutMode }, set: { app.setLayout($0) })
-    }
-
     private var canCompare: Bool {
         guard let session = app.activeSession else { return false }
         return session.status.isConnected && session.local != nil && session.server != nil
@@ -200,8 +189,24 @@ struct ConnectionTabsBar: View {
         HStack(spacing: 0) {
             ScrollView(.horizontal) {
                 HStack(spacing: 2) {
-                    ForEach(app.sessions) { session in
-                        ConnectionTab(session: session, active: session.id == app.activeSessionID)
+                    ForEach(app.tabBarItems) { item in
+                        switch item {
+                        case .group(let group, let members):
+                            TabGroupOutline(group: group) {
+                                ForEach(members) { session in
+                                    ConnectionTab(session: session, active: session.id == app.activeSessionID, group: group)
+                                }
+                            }
+                        case .collapsed(let group):
+                            TabGroupChip(group: group, isOpen: true)
+                        case .tab(let session):
+                            ConnectionTab(session: session, active: session.id == app.activeSessionID, group: nil)
+                        }
+                    }
+                    let closed = app.closedGroups
+                    if !closed.isEmpty {
+                        Divider().frame(height: 16).padding(.horizontal, 4)
+                        ForEach(closed) { group in TabGroupChip(group: group, isOpen: false) }
                     }
                 }
                 .padding(.horizontal, 8)
@@ -228,6 +233,7 @@ struct ConnectionTab: View {
     @Environment(AppModel.self) private var app
     let session: ConnectionSession
     let active: Bool
+    let group: TabGroup?
 
     var body: some View {
         HStack(spacing: 6) {
@@ -254,9 +260,15 @@ struct ConnectionTab: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 5)
-        .background(active ? Palette.ground : Color.clear, in: UnevenRoundedRectangle(topLeadingRadius: 6, topTrailingRadius: 6))
+        .background(tabFill, in: UnevenRoundedRectangle(topLeadingRadius: 6, topTrailingRadius: 6))
+        .overlay(alignment: .top) {
+            if let color = session.connection.color {
+                color.color.frame(height: 2).clipShape(UnevenRoundedRectangle(topLeadingRadius: 6, topTrailingRadius: 6))
+            }
+        }
         .contentShape(Rectangle())
         .onTapGesture { app.activate(session) }
+        .reordersSession(session.id)
         .contextMenu {
             Button("Reconnect") { app.reconnect(session) }
             Button("Open in New Tab") { app.open(session.connection, newTab: true) }
@@ -266,12 +278,28 @@ struct ConnectionTab: View {
             if app.canOpenCPanel(session.connection) {
                 Button("Open cPanel") { app.openCPanel(for: session.connection) }
             }
+            ConnectionColorMenu(connection: session.connection)
+            Divider()
+            TabGroupMenuItems(session: session)
             Divider()
             Button("Close Tab") { app.close(session) }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(session.connection.name), \(session.status.label)")
+        .accessibilityLabel(accessibilityName)
+        .accessibilityHint("Drag onto the edge of another tab to move it, or onto its middle to group them")
         .accessibilityAddTraits(active ? .isSelected : [])
+    }
+}
+
+extension ConnectionTab {
+    private var accessibilityName: String {
+        let name = "\(session.connection.name), \(session.status.label)"
+        return group == nil ? name : "\(name), in a tab group"
+    }
+
+    private var tabFill: Color {
+        if let color = session.connection.color { return color.fill(active: active) }
+        return active ? Palette.ground : Color.clear
     }
 }
 
@@ -347,7 +375,8 @@ struct SessionContent: View {
                 PaneView(pane: local, session: session)
                     .frame(minWidth: 320)
                 PaneView(pane: server, session: session)
-                    .frame(minWidth: 320)
+                .overlay(alignment: .top) { ConnectionColorStripe(color: session.connection.color) }
+                .frame(minWidth: 320)
             }
         } else {
             ConnectionStateView(session: session)

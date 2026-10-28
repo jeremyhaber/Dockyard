@@ -25,9 +25,10 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension, 
         for identifier: NSFileProviderItemIdentifier, request: NSFileProviderRequest,
         completionHandler: @escaping (NSFileProviderItem?, Error?) -> Void
     ) -> Progress {
-        nonisolated(unsafe) let completion = completionHandler
+        let completionBox = UncheckedSendable(completionHandler)
         let context = self.context
         Task {
+            let completion = completionBox.value
             do {
                 if identifier == .rootContainer {
                     completion(await context.rootItem(), nil)
@@ -58,9 +59,10 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension, 
         request: NSFileProviderRequest, completionHandler: @escaping (URL?, NSFileProviderItem?, Error?) -> Void
     ) -> Progress {
         let progress = Progress(totalUnitCount: 1)
-        nonisolated(unsafe) let completion = completionHandler
+        let completionBox = UncheckedSendable(completionHandler)
         let context = self.context
         Task {
+            let completion = completionBox.value
             do {
                 guard let path = await context.path(for: itemIdentifier) else { throw NSFileProviderError(.noSuchItem) }
                 let directory = await context.temporaryDirectory()
@@ -89,12 +91,13 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension, 
         options: NSFileProviderCreateItemOptions = [], request: NSFileProviderRequest,
         completionHandler: @escaping (NSFileProviderItem?, NSFileProviderItemFields, Bool, Error?) -> Void
     ) -> Progress {
-        nonisolated(unsafe) let completion = completionHandler
+        let completionBox = UncheckedSendable(completionHandler)
         let context = self.context
         let name = itemTemplate.filename
         let parentID = itemTemplate.parentItemIdentifier
         let isFolder = itemTemplate.contentType == .folder
         Task {
+            let completion = completionBox.value
             do {
                 guard !(await context.isReadOnly()) else { throw MountContext.MountError.readOnly }
                 guard let parent = await context.path(for: parentID) else { throw NSFileProviderError(.noSuchItem) }
@@ -123,7 +126,7 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension, 
         contents newContents: URL?, options: NSFileProviderModifyItemOptions = [], request: NSFileProviderRequest,
         completionHandler: @escaping (NSFileProviderItem?, NSFileProviderItemFields, Bool, Error?) -> Void
     ) -> Progress {
-        nonisolated(unsafe) let completion = completionHandler
+        let completionBox = UncheckedSendable(completionHandler)
         let context = self.context
         let identifier = item.itemIdentifier
         let newName = item.filename
@@ -132,6 +135,7 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension, 
         let hasContents = changedFields.contains(.contents)
         let base = ProviderItem.version(from: version.contentVersion)
         Task {
+            let completion = completionBox.value
             do {
                 guard !(await context.isReadOnly()) else { throw MountContext.MountError.readOnly }
                 guard var path = await context.path(for: identifier) else { throw NSFileProviderError(.noSuchItem) }
@@ -184,9 +188,10 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension, 
         options: NSFileProviderDeleteItemOptions = [], request: NSFileProviderRequest,
         completionHandler: @escaping (Error?) -> Void
     ) -> Progress {
-        nonisolated(unsafe) let completion = completionHandler
+        let completionBox = UncheckedSendable(completionHandler)
         let context = self.context
         Task {
+            let completion = completionBox.value
             do {
                 guard !(await context.isReadOnly()) else { throw MountContext.MountError.readOnly }
                 guard let path = await context.path(for: identifier) else { throw NSFileProviderError(.noSuchItem) }

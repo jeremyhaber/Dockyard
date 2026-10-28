@@ -13,7 +13,7 @@ struct TransferSettingsSections: View {
             Picker("When a file already exists", selection: $conflict) {
                 ForEach(ConflictPolicy.allCases, id: \.rawValue) { Text($0.title).tag($0.rawValue) }
             }
-            Text("Sites can set their own default in the site editor. A batch can pick a rule from the Upload with and Download with menus.")
+            Text("Sites can set their own default in the site editor.")
                 .font(.caption).foregroundStyle(Palette.textSecondary)
             Picker("On launch with leftover transfers", selection: $leftovers) {
                 ForEach(LeftoverChoice.allCases) { Text($0.title).tag($0.rawValue) }

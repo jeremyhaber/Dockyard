@@ -108,6 +108,13 @@ struct ExportPayload: Codable {
         var jumpHost: UUID?
         var pinnedFolders: [PinnedFolder]
         var transferFilters: [String]
+        /// Optional so exports from before web URLs and icons still decode.
+        var webURLs: [WebURLMapping]?
+        var icon: ConnectionIcon?
+        var color: ConnectionColor?
+        var faviconSite: String?
+        /// Optional so exports from before the tree-root setting still decode.
+        var treeRoot: FolderTreeRoot?
 
         init(_ c: Connection) {
             id = c.id; name = c.name; clientFolderId = c.clientFolderId; `protocol` = c.protocol.rawValue
@@ -119,7 +126,8 @@ struct ExportPayload: Codable {
             createdAt = c.createdAt; initialRemotePath = c.initialRemotePath
             trashOnDelete = c.trashOnDelete; keepVersionsOnOverwrite = c.keepVersionsOnOverwrite; readOnly = c.readOnly
             verifyChecksums = c.verifyChecksums; jumpHost = c.jumpHost; pinnedFolders = c.pinnedFolders
-            transferFilters = c.transferFilters
+            transferFilters = c.transferFilters; webURLs = c.webURLs; icon = c.icon; color = c.color; faviconSite = c.faviconSite
+            treeRoot = c.treeRoot
         }
 
         var connection: Connection {
@@ -130,9 +138,10 @@ struct ExportPayload: Codable {
                 askBeforeElevatingOnProd: askBeforeElevatingOnProd, isProd: isProd, favorite: favorite, tags: tags, notes: notes,
                 source: ConnectionSource(rawValue: source) ?? .manual, restoreSession: restoreSession,
                 mountInFinder: mountInFinder, mountOnLaunch: mountOnLaunch, mountReadOnly: mountReadOnly,
-                createdAt: createdAt, initialRemotePath: initialRemotePath, trashOnDelete: trashOnDelete,
+                createdAt: createdAt, initialRemotePath: initialRemotePath, treeRoot: treeRoot ?? .home, trashOnDelete: trashOnDelete,
                 keepVersionsOnOverwrite: keepVersionsOnOverwrite, readOnly: readOnly, verifyChecksums: verifyChecksums,
-                jumpHost: jumpHost, pinnedFolders: pinnedFolders, transferFilters: transferFilters)
+                jumpHost: jumpHost, pinnedFolders: pinnedFolders, transferFilters: transferFilters,
+                webURLs: webURLs ?? [], icon: icon, color: color, faviconSite: faviconSite)
         }
     }
 

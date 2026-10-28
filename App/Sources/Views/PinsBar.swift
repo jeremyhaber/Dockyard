@@ -1,3 +1,4 @@
+import AppKit
 import ConnectionKit
 import DockyardCore
 import SwiftUI
@@ -80,6 +81,36 @@ struct PinButton: View {
         }
         .help(pinned ? "Unpin this folder" : "Pin this folder")
         .accessibilityLabel(pinned ? "Unpin this folder" : "Pin this folder")
+    }
+}
+
+/// Copies the current folder's web address; without a mapping, offers to set one.
+struct WebURLButton: View {
+    @Environment(AppModel.self) private var app
+    let pane: PaneModel
+    let session: ConnectionSession
+
+    var body: some View {
+        let url = app.webURL(for: pane.currentPath, on: session.connection)
+        Menu {
+            if let url {
+                Button("Copy \(url.absoluteString)") { app.copyWebURLs([pane.currentPath], folder: pane.currentPath, in: session) }
+                Button("Open in Browser") { NSWorkspace.shared.open(url) }
+                Divider()
+                Button("Edit Web URL\u{2026}") { app.editWebURL(at: pane.currentPath, in: session) }
+            } else {
+                Button("Set Web URL for This Folder\u{2026}") { app.editWebURL(at: pane.currentPath, in: session) }
+            }
+        } label: {
+            Image(systemName: url == nil ? "link.badge.plus" : "link")
+        } primaryAction: {
+            app.copyWebURLs([pane.currentPath], folder: pane.currentPath, in: session)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help(url.map { "Copy \($0.absoluteString)" } ?? "Set a web URL for this folder")
+        .accessibilityLabel(url == nil ? "Set web URL" : "Copy web URL")
     }
 }
 

@@ -58,7 +58,8 @@ import ConnectionKit
     @Test func compactModifiedDate() {
         let utc = TimeZone(identifier: "UTC")!
         let now = Date(timeIntervalSince1970: 1_792_929_600)  // 2026-10-25 12:00 UTC
-        let sameYear = Date(timeIntervalSince1970: 1_792_929_600 - 3 * 86_400 + 2 * 3_600 + 120)
+        let sameYearOffset: TimeInterval = -3 * 86_400 + 2 * 3_600 + 120
+        let sameYear = now.addingTimeInterval(sameYearOffset)
         #expect(FileDisplay.modifiedCompact(nil, now: now, timeZone: utc) == "")
         #expect(FileDisplay.modifiedCompact(now, now: now, timeZone: utc) == "Oct 25, 12:00")
         #expect(FileDisplay.modifiedCompact(sameYear, now: now, timeZone: utc) == "Oct 22, 14:02")

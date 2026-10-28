@@ -18,6 +18,9 @@ enum AppGroup {
     /// True when this build carries the App Group entitlement, i.e. the extension can share data with it.
     static var isSigned: Bool { entitlement("com.apple.security.application-groups").contains(identifier) }
 
+    /// Mount controls are hidden unless the Finder extension can load (self-signed and ad-hoc builds cannot).
+    static let mountingAvailable = isSigned
+
     static var containerURL: URL? {
         guard isSigned else { return nil }
         return FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: identifier)

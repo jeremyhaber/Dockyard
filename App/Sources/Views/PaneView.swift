@@ -177,6 +177,7 @@ struct PathBar: View {
                         HistoryPopover(pane: pane, session: session) { showHistory = false }
                     }
                 PinButton(pane: pane, session: session)
+                WebURLButton(pane: pane, session: session)
             }
             Button { showRecent.toggle() } label: { Image(systemName: "arrow.uturn.backward.circle") }
                 .help("Recent changes and Undo")
@@ -188,7 +189,13 @@ struct PathBar: View {
         .buttonStyle(.borderless)
         .padding(.horizontal, 8)
         .frame(height: 30)
-        .background(Palette.chrome)
+        .background {
+            if pane.side == .server, let color = session.connection.color {
+                Palette.chrome.overlay(color.color.opacity(0.10))
+            } else {
+                Palette.chrome
+            }
+        }
         .onChange(of: pane.pathEditToken) { beginEditing() }
         .onChange(of: pane.historyToken) { if pane.side == .server { showHistory = true } }
         .onChange(of: pane.recentToken) { showRecent = true }

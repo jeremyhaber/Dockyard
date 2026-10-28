@@ -258,6 +258,13 @@ final class ConnectionSession: Identifiable {
     // MARK: Guardrails
 
     /// Read-only refusals and PROD confirmations for server writes. Local operations are never guarded.
+    /// True when `authorize` will show the PROD confirmation, so callers skip their own and the user sees one dialog.
+    func asksBeforeRunning(_ kind: OperationKind, paths: [String], side: PaneSide) -> Bool {
+        guard side == .server else { return false }
+        if case .confirm = Guardrails.decide(GuardedOperation(kind, paths: paths), for: connection, suppressed: suppressedKinds) { return true }
+        return false
+    }
+
     func authorize(_ kind: OperationKind, paths: [String], side: PaneSide = .server) async -> Bool {
         guard side == .server else { return true }
         switch Guardrails.decide(GuardedOperation(kind, paths: paths), for: connection, suppressed: suppressedKinds) {
@@ -270,6 +277,7 @@ final class ConnectionSession: Identifiable {
         case .confirm(let summary):
             var message = "\(connection.name) is a PROD site."
             if summary.hiddenCount > 0 { message += " \(summary.hiddenCount) more are not listed." }
+            if kind == .delete, !connection.trashOnDelete { message += " The items are deleted from the server and cannot be recovered." }
             let request = ConfirmRequest(
                 title: summary.title, message: message, confirmTitle: kind == .delete ? "Delete" : "Overwrite",
                 items: summary.items, suppressTitle: summary.canSuppressForSession ? "Don\u{2019}t ask again for this session" : nil)

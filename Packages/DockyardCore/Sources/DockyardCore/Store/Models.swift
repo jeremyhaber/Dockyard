@@ -111,6 +111,8 @@ public struct Connection: Sendable, Hashable, Identifiable {
     public var userEditedFields: Set<UserEditableField>
     /// Initial remote folder, if the user set one (e.g. from a pasted URL).
     public var initialRemotePath: String?
+    /// Where the server pane's folder tree starts. `..` above it climbs further.
+    public var treeRoot: FolderTreeRoot
     /// Default local folder when there is no session to restore.
     public var localFolder: String?
     /// Set for `rclone` connections.
@@ -129,6 +131,14 @@ public struct Connection: Sendable, Hashable, Identifiable {
     public var transferFilters: [String]
     /// What to do about existing files on this site; nil follows the global default in Settings.
     public var defaultConflictAction: ConflictPolicy?
+    /// Remote folders served as websites; "Copy Web URL" uses the deepest one containing a file.
+    public var webURLs: [WebURLMapping]
+    /// Custom sidebar icon; nil shows the website icon or initials.
+    public var icon: ConnectionIcon?
+    /// Colour label on the tab and panel header.
+    public var color: ConnectionColor?
+    /// A website to take the icon from (`example.com`), tried before the host and the web URLs.
+    public var faviconSite: String?
 
     /// Which ssh-agent the `.agent` auth method uses.
     public var agentSocket: AgentSocket
@@ -176,6 +186,7 @@ public struct Connection: Sendable, Hashable, Identifiable {
         isNew: Bool = false,
         userEditedFields: Set<UserEditableField> = [],
         initialRemotePath: String? = nil,
+        treeRoot: FolderTreeRoot = .home,
         localFolder: String? = nil,
         cloud: CloudSpec? = nil,
         trashOnDelete: Bool = false,
@@ -186,6 +197,10 @@ public struct Connection: Sendable, Hashable, Identifiable {
         pinnedFolders: [PinnedFolder] = [],
         transferFilters: [String] = [],
         defaultConflictAction: ConflictPolicy? = nil,
+        webURLs: [WebURLMapping] = [],
+        icon: ConnectionIcon? = nil,
+        color: ConnectionColor? = nil,
+        faviconSite: String? = nil,
         maxConnections: Int = Connection.defaultMaxConnections,
         connectDelayMs: Int = 0,
         agentSocket: AgentSocket = .system,
@@ -220,6 +235,7 @@ public struct Connection: Sendable, Hashable, Identifiable {
         self.isNew = isNew
         self.userEditedFields = userEditedFields
         self.initialRemotePath = initialRemotePath
+        self.treeRoot = treeRoot
         self.localFolder = localFolder
         self.cloud = cloud
         self.trashOnDelete = trashOnDelete
@@ -230,6 +246,10 @@ public struct Connection: Sendable, Hashable, Identifiable {
         self.pinnedFolders = pinnedFolders
         self.transferFilters = transferFilters
         self.defaultConflictAction = defaultConflictAction
+        self.webURLs = webURLs
+        self.icon = icon
+        self.color = color
+        self.faviconSite = faviconSite
         self.maxConnections = min(max(maxConnections, Self.maxConnectionsRange.lowerBound), Self.maxConnectionsRange.upperBound)
         self.connectDelayMs = max(0, connectDelayMs)
         self.agentSocket = agentSocket
@@ -302,6 +322,7 @@ extension Connection: FetchableRecord, PersistableRecord, TableRecord {
             userEditedFields: Set(((try? JSONDecoder().decode([String].self, from: Data(editedJSON.utf8))) ?? [])
                 .compactMap(UserEditableField.init(rawValue:))),
             initialRemotePath: row["initialRemotePath"],
+            treeRoot: (row["treeRoot"] as String?).flatMap(FolderTreeRoot.init(rawValue:)) ?? .home,
             localFolder: row["localFolder"],
             cloud: Self.decodeCloud(row),
             trashOnDelete: row["trashOnDelete"],
@@ -312,6 +333,10 @@ extension Connection: FetchableRecord, PersistableRecord, TableRecord {
             pinnedFolders: Self.decodeJSON(row["pinnedFolders"], default: []),
             transferFilters: Self.decodeJSON(row["transferFilters"], default: []),
             defaultConflictAction: (row["defaultConflictAction"] as String?).flatMap(ConflictPolicy.init(rawValue:)),
+            webURLs: Self.decodeJSON(row["webURLs"], default: []),
+            icon: (row["icon"] as String?).flatMap { try? JSONDecoder().decode(ConnectionIcon.self, from: Data($0.utf8)) },
+            color: (row["color"] as String?).flatMap(ConnectionColor.init(rawValue:)),
+            faviconSite: row["faviconSite"],
             maxConnections: row["maxConnections"],
             connectDelayMs: row["connectDelayMs"],
             agentSocket: (row["agentSocket"] as String?).flatMap(AgentSocket.init(rawValue:)) ?? .system,
@@ -364,6 +389,7 @@ extension Connection: FetchableRecord, PersistableRecord, TableRecord {
         container["userEditedFields"] = String(
             decoding: try JSONEncoder().encode(userEditedFields.map(\.rawValue).sorted()), as: UTF8.self)
         container["initialRemotePath"] = initialRemotePath
+        container["treeRoot"] = treeRoot.rawValue
         container["localFolder"] = localFolder
         container["cloudBackend"] = cloud?.backend
         container["cloudOptions"] = try cloud.map { String(decoding: try JSONEncoder().encode($0.options), as: UTF8.self) }
@@ -376,6 +402,10 @@ extension Connection: FetchableRecord, PersistableRecord, TableRecord {
         container["pinnedFolders"] = String(decoding: try JSONEncoder().encode(pinnedFolders), as: UTF8.self)
         container["transferFilters"] = String(decoding: try JSONEncoder().encode(transferFilters), as: UTF8.self)
         container["defaultConflictAction"] = defaultConflictAction?.rawValue
+        container["webURLs"] = String(decoding: try JSONEncoder().encode(webURLs), as: UTF8.self)
+        container["color"] = color?.rawValue
+        container["faviconSite"] = faviconSite
+        container["icon"] = try icon.map { String(decoding: try JSONEncoder().encode($0), as: UTF8.self) }
         container["maxConnections"] = maxConnections
         container["connectDelayMs"] = connectDelayMs
         container["agentSocket"] = agentSocket.rawValue

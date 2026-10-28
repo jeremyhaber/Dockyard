@@ -65,16 +65,53 @@ public struct FolderTree: Sendable, Equatable {
     }
 
     /// Expands every ancestor of `path` so it is visible (used when the current folder changes).
+    /// A folder outside the tree raises the root to the nearest common ancestor first.
     public mutating func reveal(_ path: String, loader: Loader) async {
+        let p = PathTools.normalize(path)
+        if !Self.contains(root.path, p) { await raise(to: Self.commonAncestor(root.path, p), loader: loader) }
         var acc = root.path
         await expandIfNeeded(acc, loader: loader)
-        for c in PathTools.components(of: path).dropFirst(PathTools.components(of: root.path).count).dropLast() {
+        for c in PathTools.components(of: p).dropFirst(PathTools.components(of: root.path).count).dropLast() {
             acc = RemotePath.join(acc == "/" ? "" : acc, c)
             // Make sure the next level is known before expanding it.
             guard find(acc) != nil else { return }
             await expandIfNeeded(acc, loader: loader)
         }
         // The deepest folder is revealed, not expanded.
+    }
+
+    /// Moves the root up to `ancestor` (the `..` row), keeping everything already loaded below the old root.
+    public mutating func raise(to ancestor: String, loader: Loader) async {
+        let target = PathTools.normalize(ancestor)
+        let old = root
+        guard target != old.path, Self.contains(target, old.path) else { return }
+        var tree = FolderTree(rootPath: target)
+        await tree.expand(target, loader: loader)
+        await tree.reveal(old.path, loader: loader)
+        tree.graft(old)
+        self = tree
+    }
+
+    /// Puts `subtree` at its path, adding any folders a failed listing left out, and expands its parents.
+    private mutating func graft(_ subtree: TreeNode) {
+        let rest = PathTools.components(of: subtree.path).dropFirst(PathTools.components(of: root.path).count)
+        Self.graft(subtree, into: &root, rest)
+    }
+
+    private static func graft(_ subtree: TreeNode, into node: inout TreeNode, _ rest: ArraySlice<String>) {
+        guard let next = rest.first else { node = subtree; return }
+        var kids = node.children ?? []
+        let path = RemotePath.join(node.path == "/" ? "" : node.path, next)
+        let index: Int
+        if let found = kids.firstIndex(where: { $0.path == path }) {
+            index = found
+        } else {
+            kids.append(TreeNode(name: next, path: path, children: nil))
+            index = kids.count - 1
+        }
+        graft(subtree, into: &kids[index], rest.dropFirst())
+        node.children = kids
+        node.isExpanded = true
     }
 
     private mutating func expandIfNeeded(_ path: String, loader: Loader) async {
@@ -91,6 +128,9 @@ public struct FolderTree: Sendable, Equatable {
     }
 
     // MARK: Queries
+
+    /// True when there is a folder above the root to show (the `..` row).
+    public var canRaise: Bool { root.path != "/" }
 
     public var expandedPaths: [String] {
         var out: [String] = []
@@ -125,7 +165,7 @@ public struct FolderTree: Sendable, Equatable {
 
     private func find(_ path: String) -> TreeNode? {
         var node = root
-        guard path.hasPrefix(root.path) else { return nil }
+        guard Self.contains(root.path, path) else { return nil }
         if path == root.path { return node }
         let rest = PathTools.components(of: path).dropFirst(PathTools.components(of: root.path).count)
         var acc = root.path
@@ -141,8 +181,18 @@ public struct FolderTree: Sendable, Equatable {
         let p = PathTools.normalize(path)
         let rootComps = PathTools.components(of: root.path).count
         let comps = Array(PathTools.components(of: p).dropFirst(rootComps))
-        guard p.hasPrefix(root.path) else { return }
+        guard Self.contains(root.path, p) else { return }
         Self.apply(&root, comps[...], change)
+    }
+
+    /// True when `path` is `ancestor` or inside it. Both normalized.
+    static func contains(_ ancestor: String, _ path: String) -> Bool {
+        ancestor == "/" || path == ancestor || path.hasPrefix(ancestor + "/")
+    }
+
+    static func commonAncestor(_ a: String, _ b: String) -> String {
+        let shared = zip(PathTools.components(of: a), PathTools.components(of: b)).prefix { $0 == $1 }.map(\.0)
+        return "/" + shared.joined(separator: "/")
     }
 
     private static func apply(_ node: inout TreeNode, _ rest: ArraySlice<String>, _ change: (inout TreeNode) -> Void) {

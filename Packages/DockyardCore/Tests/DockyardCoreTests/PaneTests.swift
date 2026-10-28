@@ -270,6 +270,47 @@ import ConnectionKit
         #expect(tree.node(at: "/a")?.isExpanded == true)
     }
 
+    @Test func homeRootedTreeRaisesKeepingLoadedFolders() async {
+        let f = fs()
+        let loader: FolderTree.Loader = { try await f.list($0) }
+        var tree = FolderTree(rootPath: "/a")
+        await tree.reveal("/a/b/c", loader: loader)
+        #expect(tree.canRaise)
+        #expect(tree.visibleRows(for: PaneState(initialPath: "/a/b/c")).map(\.path) == ["/a", "/a/b", "/a/b/c", "/a/d"])
+        await tree.raise(to: "/", loader: loader)
+        #expect(!tree.canRaise)
+        #expect(tree.root.path == "/")
+        #expect(tree.expandedPaths.sorted() == ["/", "/a", "/a/b"])
+        #expect(tree.root.children?.map(\.name) == ["a", "e"])
+    }
+
+    @Test func raiseSurvivesUnlistableParent() async {
+        let f = fs()
+        f.state.withLock { $0.listFailures["/"] = RemoteError.permissionDenied("/") }
+        var tree = FolderTree(rootPath: "/a/b")
+        await tree.raise(to: "/", loader: { try await f.list($0) })
+        #expect(tree.node(at: "/a/b") != nil)
+        #expect(tree.expandedPaths.sorted() == ["/", "/a"])
+    }
+
+    @Test func revealOutsideRootRaisesToCommonAncestor() async {
+        let f = fs()
+        var tree = FolderTree(rootPath: "/a/b")
+        await tree.reveal("/a/d", loader: { try await f.list($0) })
+        #expect(tree.root.path == "/a")
+        #expect(tree.visibleRows(for: PaneState(initialPath: "/a/d")).first { $0.isCurrent }?.path == "/a/d")
+        // A sibling whose name starts with the root's name is still outside it.
+        f.makeDir("/a/bb")
+        var narrow = FolderTree(rootPath: "/a/b")
+        await narrow.reveal("/a/bb", loader: { try await f.list($0) })
+        #expect(narrow.root.path == "/a")
+    }
+
+    @Test func treeRootSetting() {
+        #expect(FolderTreeRoot.home.path(home: "/home/u/") == "/home/u")
+        #expect(FolderTreeRoot.serverRoot.path(home: "/home/u") == "/")
+    }
+
     @Test func toggle() async {
         let f = fs()
         var tree = FolderTree()

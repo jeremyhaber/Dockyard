@@ -343,10 +343,27 @@ enum DemoSeeder {
             if let bluebird { app.activate(bluebird) }
             app.drawerTab = .terminal
             app.drawerVisible = true
+        case "sideBySideColumns":
+            // Three colour-labelled columns, wider than the window, with the last one active.
+            guard let acme, let bluebird else { return }
+            try? await app.connections.update(acme.connection.id) { $0.color = .red }
+            try? await app.connections.update(bluebird.connection.id) { $0.color = .teal }
+            app.groupSession(bluebird.id, with: acme.id)
+            if let third = app.sessions.first(where: { $0.id != acme.id && $0.id != bluebird.id }) {
+                app.groupSession(third.id, with: bluebird.id)
+                app.activate(third)
+            }
+        case "tabGroups":
+            // Two tabs grouped and shown side by side at uneven widths, the third ungrouped, and a closed group.
+            guard let acme, let bluebird else { return }
+            app.tabGroups = [TabGroup(id: UUID(), color: .orange, connectionIDs: [id(4), id(6)])]
+            app.groupSession(bluebird.id, with: acme.id)
+            if let client = app.group(id: app.sessionGroups[acme.id]) { app.setColor(.blue, for: client) }
+            app.columnWeights = [acme.id: 1.4, bluebird.id: 0.6]
+            app.activate(acme)
         case "sideBySide":
             guard let acme, let bluebird else { return }
-            app.layoutMode = .sideBySide
-            app.columnIDs = [acme.id, bluebird.id]
+            app.groupSession(bluebird.id, with: acme.id)
             app.activate(acme)
             if let pane = bluebird.server {
                 app.dropHint = DropHint(paneID: pane.id, text: "Drop to copy 2 files here \u{00B7} Acme Corp \u{2192} Bluebird Bakery")

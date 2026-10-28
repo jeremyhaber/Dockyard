@@ -59,3 +59,57 @@ struct TreeResizeHandle: View {
         min(max(value, TreeLayout.minHeight), TreeLayout.maxHeight)
     }
 }
+
+/// The expanded local pane in side by side.
+enum LocalPaneLayout {
+    static let defaultWidth = 320.0
+    static let minWidth = 240.0
+    static let maxWidth = 640.0
+
+    static func clamp(_ width: Double) -> Double { min(max(width, minWidth), maxWidth) }
+}
+
+/// The draggable divider between side-by-side panes. Drag reports the distance from where the drag began;
+/// double-click evens the panes out.
+struct ColumnResizeHandle: View {
+    let label: String
+    let onBegin: () -> Void
+    let onDrag: (Double) -> Void
+    let onReset: () -> Void
+    @State private var dragging = false
+
+    var body: some View {
+        Rectangle()
+            .fill(Palette.border)
+            .frame(width: 1)
+            .overlay {
+                Rectangle()
+                    .fill(Color.clear)
+                    .frame(width: 8)
+                    .contentShape(Rectangle())
+                    .onHover { inside in
+                        if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+                    }
+                    .onTapGesture(count: 2, perform: onReset)
+                    .gesture(
+                        // Global, because the handle moves with the drag.
+                        DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                            .onChanged { value in
+                                if !dragging {
+                                    dragging = true
+                                    onBegin()
+                                }
+                                onDrag(value.translation.width)
+                            }
+                            .onEnded { _ in dragging = false }
+                    )
+            }
+            .zIndex(1)
+            .accessibilityElement()
+            .accessibilityLabel(label)
+            .accessibilityAdjustableAction { direction in
+                onBegin()
+                onDrag(direction == .increment ? 20 : -20)
+            }
+    }
+}

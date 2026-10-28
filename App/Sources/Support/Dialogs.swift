@@ -18,6 +18,29 @@ enum Dialogs {
         return field.stringValue.trimmingCharacters(in: .whitespaces)
     }
 
+    /// A text field with a labelled pop-up under it, so a feature asks everything in one dialog.
+    static func promptText(
+        title: String, message: String, initial: String = "", choiceLabel: String, choices: [String], confirm: String = "OK"
+    ) -> (text: String, choice: Int)? {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.addButton(withTitle: confirm)
+        alert.addButton(withTitle: "Cancel")
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 58))
+        let field = NSTextField(frame: NSRect(x: 0, y: 34, width: 300, height: 24))
+        field.stringValue = initial
+        let label = NSTextField(labelWithString: choiceLabel)
+        label.frame = NSRect(x: 0, y: 4, width: 70, height: 17)
+        let popup = NSPopUpButton(frame: NSRect(x: 70, y: 0, width: 230, height: 25), pullsDown: false)
+        popup.addItems(withTitles: choices)
+        for view in [field, label, popup] { container.addSubview(view) }
+        alert.accessoryView = container
+        alert.window.initialFirstResponder = field
+        guard alert.runModal() == .alertFirstButtonReturn else { return nil }
+        return (field.stringValue.trimmingCharacters(in: .whitespaces), popup.indexOfSelectedItem)
+    }
+
     static func confirm(title: String, message: String, confirm: String, destructive: Bool = true) -> Bool {
         let alert = NSAlert()
         alert.messageText = title

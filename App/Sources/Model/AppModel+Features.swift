@@ -200,44 +200,48 @@ extension AppModel {
 // MARK: - Layout and side by side
 
 extension AppModel {
-    var columnSessions: [ConnectionSession] {
-        columnIDs.compactMap { id in sessions.first { $0.id == id } }
-    }
+    /// There is no layout switch: a grouped tab shows its group side by side, an ungrouped one shows local + server.
+    var layoutMode: LayoutMode { activeGroupID == nil ? .localServer : .sideBySide }
 
-    func setLayout(_ mode: LayoutMode) {
-        layoutMode = mode
-        if mode == .sideBySide { seedColumns() }
-    }
+    /// The active tab's group, in tab order.
+    var columnSessions: [ConnectionSession] { activeGroupID.map(members) ?? [] }
 
-    /// Fills the columns with the active connection and the next open one when none are chosen yet.
-    func seedColumns() {
-        columnIDs = columnIDs.filter { id in sessions.contains { $0.id == id } }
-        guard columnIDs.isEmpty else { return }
-        let ordered = (activeSession.map { [$0] } ?? []) + sessions.filter { $0.id != activeSessionID }
-        columnIDs = ordered.prefix(2).map(\.id)
-    }
-
+    /// Adds an open tab to the group on screen.
     func addColumn(_ session: ConnectionSession) {
-        guard !columnIDs.contains(session.id) else { return }
-        columnIDs.append(session.id)
+        guard let groupID = activeGroupID else { return }
+        setGroup(session, to: groupID)
         activeSessionID = session.id
     }
 
     func addColumn(_ connection: Connection) {
+        let groupID = activeGroupID
         open(connection)
-        if let session = session(for: connection.id) { addColumn(session) }
+        guard let groupID, let session = activeSession, session.connection.id == connection.id else { return }
+        setGroup(session, to: groupID)
+        activeSessionID = session.id
     }
 
+    /// Takes a tab out of the group on screen; with one tab left the group dissolves back to a single view.
     func removeColumn(_ id: UUID) {
-        columnIDs.removeAll { $0 == id }
+        columnWeights[id] = nil
+        guard let groupID = sessionGroups[id], let session = sessions.first(where: { $0.id == id }) else { return }
+        if activeSessionID == id { activeSessionID = members(of: groupID).first { $0.id != id }?.id }
+        setGroup(session, to: nil)
     }
 
-    /// ⌥↩ in the connection manager.
+    func columnWeight(_ id: UUID) -> Double { columnWeights[id] ?? 1 }
+
+    /// Even widths for every column.
+    func resetColumnWidths() { columnWeights = [:] }
+
+    /// ⌥↩ in the connection manager and "Open Side by Side" in the sidebar: opens the connection grouped with the
+    /// active tab.
     func openSideBySide(_ connection: Connection) {
+        let current = activeSessionID
         open(connection)
-        layoutMode = .sideBySide
-        seedColumns()
-        if let session = session(for: connection.id) { addColumn(session) }
+        guard let current, let session = activeSession, session.id != current,
+              sessionGroups[session.id] == nil || sessionGroups[session.id] != sessionGroups[current] else { return }
+        groupSession(session.id, with: current)
     }
 
     /// Queues a server-to-server copy (or move) relayed through this Mac.

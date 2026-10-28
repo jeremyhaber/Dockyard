@@ -2,37 +2,94 @@ import ConnectionKit
 import DockyardCore
 import SwiftUI
 
-/// "Servers side by side" (HANDOFF 8): Local collapses to a rail, every column is a connection.
+/// "Servers side by side" (HANDOFF 8), shown for a tab group: Local collapses to a rail, every column is one of the
+/// group's connections.
 struct SideBySideView: View {
     @Environment(AppModel.self) private var app
+    static let minColumnWidth: CGFloat = 300
+    static let addWidth: CGFloat = 44
+    @State private var localWidthAtDragStart = LocalPaneLayout.defaultWidth
 
     var body: some View {
         let columns = app.columnSessions
+        let weights = columns.map { app.columnWeight($0.id) }
         HStack(spacing: 0) {
             LocalRail()
-            Divider()
-            if columns.isEmpty {
-                VStack(spacing: 10) {
-                    Image(systemName: "rectangle.split.3x1").font(.system(size: 30)).foregroundStyle(Palette.textSecondary)
-                    Text("Add a server to start").font(.title3)
-                    AddColumnMenu()
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            if app.localRailExpanded, app.activeSession?.local != nil {
+                ColumnResizeHandle(
+                    label: "Resize the local pane",
+                    onBegin: { localWidthAtDragStart = app.localPaneWidth },
+                    onDrag: { app.localPaneWidth = LocalPaneLayout.clamp(localWidthAtDragStart + $0) },
+                    onReset: { app.localPaneWidth = LocalPaneLayout.defaultWidth }
+                )
             } else {
-                ForEach(columns) { session in
+                Divider()
+            }
+            // Columns share the width down to their minimum, then scroll sideways (HorizontalColumns)
+            // instead of pushing the window wider than the screen.
+            HorizontalColumns(
+                minimumWidth: Self.minimumContentWidth(weights),
+                columnFractions: weights.map { CGFloat($0 / weights.reduce(0, +)) },
+                activeIndex: columns.firstIndex { $0.id == app.activeSessionID },
+                app: app
+            ) {
+                ServerColumnsRow(columns: columns)
+            }
+            Divider()
+            VStack {
+                AddColumnMenu()
+                Spacer()
+            }
+            .padding(8)
+            .frame(width: Self.addWidth)
+        }
+    }
+
+    /// The width at which the narrowest column is `minColumnWidth`; below it the columns scroll.
+    static func minimumContentWidth(_ weights: [Double]) -> CGFloat {
+        guard let narrowest = weights.min(), narrowest > 0 else { return 0 }
+        return minColumnWidth * weights.reduce(0, +) / narrowest + CGFloat(weights.count - 1)
+    }
+}
+
+/// The columns with draggable dividers between them. Each column's width is its weight's share of the row.
+private struct ServerColumnsRow: View {
+    @Environment(AppModel.self) private var app
+    let columns: [ConnectionSession]
+    @State private var dragStart: (weights: [Double], usable: Double)?
+
+    var body: some View {
+        GeometryReader { proxy in
+            let weights = columns.map { app.columnWeight($0.id) }
+            let total = weights.reduce(0, +)
+            let usable = max(0, proxy.size.width - CGFloat(columns.count - 1))
+            HStack(spacing: 0) {
+                ForEach(Array(columns.enumerated()), id: \.element.id) { index, session in
+                    if index > 0 {
+                        ColumnResizeHandle(
+                            label: "Resize \(columns[index - 1].connection.name) and \(session.connection.name)",
+                            onBegin: { dragStart = (weights, Double(usable)) },
+                            onDrag: { resize(divider: index, by: $0) },
+                            onReset: { app.resetColumnWidths() }
+                        )
+                    }
                     ServerColumn(session: session, canRemove: columns.count > 1)
-                        .frame(minWidth: 300, maxWidth: .infinity)
-                    Divider()
+                        .frame(width: usable * weights[index] / total)
                 }
-                VStack {
-                    AddColumnMenu()
-                    Spacer()
-                }
-                .padding(8)
-                .frame(width: 44)
             }
         }
-        .onAppear { app.seedColumns() }
+    }
+
+    /// Moves width between the columns either side of divider `index`; both keep the minimum width.
+    private func resize(divider index: Int, by offset: Double) {
+        guard let start = dragStart, start.weights.count == columns.count, start.usable > 0 else { return }
+        let total = start.weights.reduce(0, +)
+        let pair = start.weights[index - 1] + start.weights[index]
+        let floor = SideBySideView.minColumnWidth * total / start.usable
+        guard pair >= 2 * floor else { return }
+        let left = min(max(start.weights[index - 1] + offset * total / start.usable, floor), pair - floor)
+        app.columnWeights[columns[index - 1].id] = left
+        app.columnWeights[columns[index].id] = pair - left
     }
 }
 
@@ -58,7 +115,7 @@ struct LocalRail: View {
                 Divider()
                 PaneView(pane: local, session: session)
             }
-            .frame(width: 320)
+            .frame(width: app.localPaneWidth)
         } else {
             VStack(spacing: 10) {
                 Button { app.localRailExpanded = true } label: { Image(systemName: "chevron.right") }
@@ -94,6 +151,7 @@ struct ServerColumn: View {
         let active = app.activeSessionID == session.id
         VStack(spacing: 0) {
             header(active: active)
+                .overlay(alignment: .top) { ConnectionColorStripe(color: session.connection.color) }
             Divider()
             if session.status.isConnected, let server = session.server {
                 PaneView(pane: server, session: session)
@@ -116,16 +174,24 @@ struct ServerColumn: View {
             if canRemove {
                 Button { app.removeColumn(session.id) } label: { Image(systemName: "xmark").font(.system(size: 9, weight: .bold)) }
                     .buttonStyle(.plain)
-                    .help("Remove this column")
-                    .accessibilityLabel("Remove column \(session.connection.name)")
+                    .help("Take this tab out of the group")
+                    .accessibilityLabel("Remove \(session.connection.name) from the group")
             }
         }
         .padding(.horizontal, 10)
         .frame(height: 26)
-        .background(active ? Palette.selection : Palette.chrome)
+        .background(session.connection.color?.fill(active: active) ?? (active ? Palette.selection : Palette.chrome))
         .contentShape(Rectangle())
         .onTapGesture { app.activeSessionID = session.id }
+        .reordersSession(session.id)
+        .contextMenu {
+            ConnectionColorMenu(connection: session.connection)
+            Button("Edit Connection\u{2026}") { app.editConnection(session.connection, origin: .main) }
+            Divider()
+            TabGroupMenuItems(session: session)
+        }
         .accessibilityElement(children: .contain)
+        .accessibilityHint("Drag onto the edge of another tab to move it, or onto its middle to group them")
     }
 }
 
@@ -135,7 +201,7 @@ struct AddColumnMenu: View {
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        let shown = Set(app.columnIDs)
+        let shown = Set(app.columnSessions.map(\.id))
         let openOthers = app.sessions.filter { !shown.contains($0.id) }
         Menu {
             if !openOthers.isEmpty {

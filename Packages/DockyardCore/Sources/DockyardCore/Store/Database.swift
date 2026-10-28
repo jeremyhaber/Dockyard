@@ -170,6 +170,10 @@ public final class DockyardDatabase: Sendable {
         migrator.registerOnePasswordMigration()
         migrator.registerConnectionHealthMigration()
         migrator.registerConflictDefaultMigration()
+        migrator.registerWebURLsMigration()
+        migrator.registerConnectionColorMigration()
+        migrator.registerFaviconSiteMigration()
+        migrator.registerTreeRootMigration()
         return migrator
     }
 }

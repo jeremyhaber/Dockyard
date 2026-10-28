@@ -34,10 +34,11 @@ final class FolderEnumerator: NSObject, NSFileProviderEnumerator, @unchecked Sen
     func invalidate() {}
 
     func enumerateItems(for observer: NSFileProviderEnumerationObserver, startingAt page: NSFileProviderPage) {
-        nonisolated(unsafe) let observer = observer
+        let observerBox = UncheckedSendable(observer)
         let context = self.context
         let identifier = self.identifier
         Task {
+            let observer = observerBox.value
             do {
                 guard let path = await context.path(for: identifier) else { throw NSFileProviderError(.noSuchItem) }
                 let list = try await context.perform { try await $0.list(path) }
@@ -76,10 +77,11 @@ final class WorkingSetEnumerator: NSObject, NSFileProviderEnumerator, @unchecked
     }
 
     func enumerateChanges(for observer: NSFileProviderChangeObserver, from anchor: NSFileProviderSyncAnchor) {
-        nonisolated(unsafe) let observer = observer
+        let observerBox = UncheckedSendable(observer)
         let context = self.context
         let since = Int(String(decoding: anchor.rawValue, as: UTF8.self)) ?? 0
         Task {
+            let observer = observerBox.value
             let result = await context.changes(since: since)
             var updated: [ProviderItem] = []
             var deleted: [NSFileProviderItemIdentifier] = []
@@ -97,9 +99,10 @@ final class WorkingSetEnumerator: NSObject, NSFileProviderEnumerator, @unchecked
     }
 
     func currentSyncAnchor(completionHandler: @escaping (NSFileProviderSyncAnchor?) -> Void) {
-        nonisolated(unsafe) let completion = completionHandler
+        let completionBox = UncheckedSendable(completionHandler)
         let context = self.context
         Task {
+            let completion = completionBox.value
             let anchor = await context.currentAnchor()
             completion(NSFileProviderSyncAnchor(Data(String(anchor).utf8)))
         }

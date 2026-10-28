@@ -38,7 +38,9 @@ struct SiteEditorSheet: View {
                             keychainPrompt: hasStoredPassword ? "Saved in Keychain" : "Optional, asked on connect")
                     }
                 }
-                finderSection
+                SiteEditorWebURLSection(draft: $draft)
+                SiteIconSection(draft: $draft)
+                if AppGroup.mountingAvailable { finderSection }
                 SiteEditorSafetySection(draft: $draft)
                 otherSection
             }
@@ -193,6 +195,11 @@ struct SiteEditorSheet: View {
                 LabeledContent("Delay between new connections", value: "\(draft.connectDelayMs) ms")
             }
             Toggle("On connect: restore last session", isOn: $draft.restoreSession)
+            if draft.protocolChoice != .cloud {
+                Picker("Folder tree starts at", selection: $draft.treeRoot) {
+                    ForEach(FolderTreeRoot.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
+            }
             Toggle("Favorite", isOn: $draft.favorite)
             TextField("Tags", text: $draft.tags, prompt: Text("Comma separated"))
             VStack(alignment: .leading, spacing: 4) {

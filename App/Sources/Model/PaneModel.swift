@@ -40,12 +40,12 @@ final class PaneModel {
     @ObservationIgnored private var loadTask: Task<Void, Never>?
     @ObservationIgnored private var treeTask: Task<Void, Never>?
 
-    init(side: PaneSide, fs: any RemoteFileSystem, state: PaneState, home: String) {
+    init(side: PaneSide, fs: any RemoteFileSystem, state: PaneState, home: String, treeRoot: String = "/") {
         self.side = side
         self.fs = fs
         self.state = state
         self.home = home
-        self.tree = FolderTree(rootPath: "/", rootName: "/")
+        self.tree = FolderTree(rootPath: treeRoot)
     }
 
     // MARK: Derived
@@ -228,6 +228,14 @@ final class PaneModel {
         state.setSort(newSort)
         rebuildRows()
         onStateChange?()
+    }
+
+    /// Shows the folder above the tree's top (the `..` row).
+    func raiseTree() {
+        guard tree.canRaise else { return }
+        let load = loader
+        let target = RemotePath.parent(of: tree.root.path)
+        mutateTree { tree in await tree.raise(to: target, loader: load) }
     }
 
     func toggleTree(_ path: String) {

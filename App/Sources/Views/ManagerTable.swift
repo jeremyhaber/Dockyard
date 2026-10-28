@@ -347,8 +347,10 @@ final class ManagerTableCoordinator: NSObject, NSTableViewDataSource, NSTableVie
         add("Edit\u{2026}", #selector(menuEdit))
         add("Duplicate", #selector(menuDuplicate))
         add("Toggle Favorite", #selector(menuFavorite))
-        let mounted = selectedConnections().first?.mountInFinder ?? false
-        add(mounted ? "Unmount from Finder" : "Mount in Finder", #selector(menuMount))
+        if AppGroup.mountingAvailable {
+            let mounted = selectedConnections().first?.mountInFinder ?? false
+            add(mounted ? "Unmount from Finder" : "Mount in Finder", #selector(menuMount))
+        }
         if let first = selectedConnections().first, AppModel.shared.canOpenCPanel(first) { add("Open cPanel", #selector(menuCPanel)) }
         menu.addItem(.separator())
         add("Test", #selector(menuTest))

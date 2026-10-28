@@ -34,7 +34,7 @@ shoot() { # name, appearance (light|dark), screen
   [ -s "$out/$name.log" ] || rm -f "$out/$name.log"
 }
 
-for screen in main connectionManager siteEditor siteEditorJump logDrawer jump terminal sideBySide compare editing recentChanges settings importPreview importUnsupported export importExport quickLook \
+for screen in main connectionManager siteEditor siteEditorJump logDrawer jump terminal sideBySide tabGroups compare editing recentChanges settings importPreview importUnsupported export importExport quickLook \
   transfers transfersFailed versions search watchFolders siteEditorSafety launchPrompt conflict; do
   shoot "$screen" light "$screen"
 done

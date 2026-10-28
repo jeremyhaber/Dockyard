@@ -99,9 +99,13 @@ final class FolderTreeCoordinator: NSObject, NSOutlineViewDataSource, NSOutlineV
     private var items: [String: TreeItem] = [:]
     private var rowInfo: [String: TreeRow] = [:]
     private var lastVersion = -1
+    /// The current folder once its row has been scrolled into view.
+    private var lastRevealed: String?
     private var syncing = false
 
     private static let cellID = NSUserInterfaceItemIdentifier("folder")
+    /// The `..` row above the tree's top folder; selecting it shows the folder above.
+    private let parentItem = TreeItem(path: "..")
 
     init(app: AppModel, pane: PaneModel, session: ConnectionSession) {
         self.app = app
@@ -143,13 +147,20 @@ final class FolderTreeCoordinator: NSObject, NSOutlineViewDataSource, NSOutlineV
         guard let outline, version != lastVersion else { return }
         lastVersion = version
         rowInfo = Dictionary(pane.treeRows.map { ($0.path, $0) }, uniquingKeysWith: { first, _ in first })
+        // Keep the user's scroll position unless the current folder changed or was just revealed.
+        let row = items[pane.currentPath].map { outline.row(forItem: $0) } ?? -1
+        let keepScroll = pane.currentPath == lastRevealed && row >= 0
         let scroll = outline.enclosingScrollView?.contentView.bounds.origin
         syncing = true
         outline.reloadData()
         expandExpanded(from: item(for: pane.tree.root.path))
         selectCurrent()
         syncing = false
-        if let scroll { outline.enclosingScrollView?.contentView.scroll(to: scroll) }
+        if keepScroll, let scroll {
+            outline.enclosingScrollView?.contentView.scroll(to: scroll)
+        } else if outline.row(forItem: items[pane.currentPath]) >= 0 {
+            lastRevealed = pane.currentPath
+        }
     }
 
     private func expandExpanded(from item: TreeItem) {
@@ -175,18 +186,21 @@ final class FolderTreeCoordinator: NSObject, NSOutlineViewDataSource, NSOutlineV
     // MARK: Data source
 
     func outlineView(_ outlineView: NSOutlineView, numberOfChildrenOfItem item: Any?) -> Int {
-        guard let item = item as? TreeItem else { return 1 }
+        guard let item = item as? TreeItem else { return pane.tree.canRaise ? 2 : 1 }
+        if item === parentItem { return 0 }
         return pane.tree.node(at: item.path)?.children?.count ?? 0
     }
 
     func outlineView(_ outlineView: NSOutlineView, child index: Int, ofItem item: Any?) -> Any {
-        guard let parent = item as? TreeItem else { return self.item(for: pane.tree.root.path) }
+        guard let parent = item as? TreeItem else {
+            return pane.tree.canRaise && index == 0 ? parentItem : self.item(for: pane.tree.root.path)
+        }
         let children = pane.tree.node(at: parent.path)?.children ?? []
         return self.item(for: children[index].path)
     }
 
     func outlineView(_ outlineView: NSOutlineView, isItemExpandable item: Any) -> Bool {
-        guard let item = item as? TreeItem, let node = pane.tree.node(at: item.path) else { return false }
+        guard let item = item as? TreeItem, item !== parentItem, let node = pane.tree.node(at: item.path) else { return false }
         if let children = node.children { return !children.isEmpty }
         return true
     }
@@ -194,7 +208,7 @@ final class FolderTreeCoordinator: NSObject, NSOutlineViewDataSource, NSOutlineV
     // MARK: Delegate
 
     func outlineView(_ outlineView: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
-        guard let item = item as? TreeItem, let info = rowInfo[item.path] else { return nil }
+        guard let item = item as? TreeItem else { return nil }
         let cell = (outlineView.makeView(withIdentifier: Self.cellID, owner: self) as? TreeCellView) ?? {
             let c = TreeCellView()
             c.identifier = Self.cellID
@@ -202,6 +216,19 @@ final class FolderTreeCoordinator: NSObject, NSOutlineViewDataSource, NSOutlineV
             c.pill.action = #selector(pillClicked(_:))
             return c
         }()
+        if item === parentItem {
+            let above = RemotePath.parent(of: pane.tree.root.path)
+            cell.textField?.stringValue = ".."
+            cell.imageView?.image = NSImage(systemSymbolName: "arrow.turn.left.up", accessibilityDescription: nil)
+            cell.imageView?.contentTintColor = .secondaryLabelColor
+            cell.pill.isHidden = true
+            cell.toolTip = "Show \(above) in the tree"
+            cell.setAccessibilityLabel("Show \(above) in the folder tree")
+            return cell
+        }
+        guard let info = rowInfo[item.path] else { return nil }
+        cell.toolTip = nil
+        cell.setAccessibilityLabel(nil)
         cell.textField?.stringValue = info.name
         cell.imageView?.image = NSImage(systemSymbolName: info.isCurrent ? "folder.fill" : "folder", accessibilityDescription: nil)
         cell.imageView?.contentTintColor = .controlAccentColor
@@ -234,11 +261,19 @@ final class FolderTreeCoordinator: NSObject, NSOutlineViewDataSource, NSOutlineV
     func outlineViewSelectionDidChange(_ notification: Notification) {
         guard !syncing, let outline, outline.selectedRow >= 0,
               let item = outline.item(atRow: outline.selectedRow) as? TreeItem else { return }
+        if item === parentItem {
+            // Re-select the current folder; the tree reloads once the folder above is listed.
+            syncing = true
+            selectCurrent()
+            syncing = false
+            pane.raiseTree()
+            return
+        }
         pane.navigate(to: item.path)
     }
 
     private func commandClick(_ row: Int) -> Bool {
-        guard let outline, let item = outline.item(atRow: row) as? TreeItem else { return false }
+        guard let outline, let item = outline.item(atRow: row) as? TreeItem, item !== parentItem else { return false }
         pane.openTab(at: item.path, activate: false)
         return true
     }
@@ -249,7 +284,7 @@ final class FolderTreeCoordinator: NSObject, NSOutlineViewDataSource, NSOutlineV
         _ outlineView: NSOutlineView, validateDrop info: NSDraggingInfo, proposedItem item: Any?,
         proposedChildIndex index: Int
     ) -> NSDragOperation {
-        guard let target = item as? TreeItem else { return [] }
+        guard let target = item as? TreeItem, target !== parentItem else { return [] }
         outlineView.setDropItem(target, dropChildIndex: NSOutlineViewDropOnItemIndex)
         return DropHandler.operation(info, pane: pane, session: session, directory: target.path)
     }

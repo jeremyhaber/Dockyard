@@ -436,17 +436,6 @@ final class FileTableCoordinator: NSObject, NSTableViewDataSource, NSTableViewDe
         } else {
             add("Download", #selector(menuTransfer), enabled: hasSelection)
         }
-        let with = NSMenuItem(title: pane.side == .local ? "Upload with\u{2026}" : "Download with\u{2026}", action: nil, keyEquivalent: "")
-        with.isEnabled = hasSelection && (pane.side == .server || session.status.isConnected)
-        let rules = NSMenu()
-        for policy in ConflictPolicy.allCases where policy != .ask {
-            let rule = NSMenuItem(title: policy.title, action: #selector(menuTransferWith(_:)), keyEquivalent: "")
-            rule.target = self
-            rule.representedObject = policy.rawValue
-            rules.addItem(rule)
-        }
-        with.submenu = rules
-        menu.addItem(with)
         menu.addItem(.separator())
         add("Rename…", #selector(menuRename), enabled: items.count == 1)
         add("Delete…", #selector(menuDelete), enabled: hasSelection)
@@ -459,6 +448,13 @@ final class FileTableCoordinator: NSObject, NSTableViewDataSource, NSTableViewDe
         menu.addItem(.separator())
         add("Copy Path", #selector(menuCopyPath), enabled: hasSelection)
         if pane.side == .server {
+            let mapped = (hasSelection ? items.map(\.path) : [pane.currentPath])
+                .contains { app.webURL(for: $0, on: session.connection) != nil }
+            add("Copy Web URL", #selector(menuCopyWebURL), enabled: mapped)
+            add("Open in Browser", #selector(menuOpenInBrowser), enabled: mapped && items.count <= 1)
+            add(WebURLResolver.mapping(for: webFolder, in: session.connection.webURLs) == nil ? "Set Web URL for Folder\u{2026}" : "Edit Web URL\u{2026}",
+                #selector(menuSetWebURL))
+            menu.addItem(.separator())
             add("Permissions…", #selector(menuChmod), enabled: hasSelection)
             let folder = items.count == 1 && items[0].isDirectory ? items[0].path : pane.currentPath
             let pinned = app.safety.isPinned(folder, on: session.connection.id)
@@ -477,20 +473,14 @@ final class FileTableCoordinator: NSObject, NSTableViewDataSource, NSTableViewDe
         if let item = pane.selectedItems.first { pane.openTab(at: item.path, activate: false) }
     }
 
-    @objc private func menuTransfer() { transferSelection(conflict: nil) }
-
-    @objc private func menuTransferWith(_ sender: NSMenuItem) {
-        transferSelection(conflict: (sender.representedObject as? String).flatMap(ConflictPolicy.init(rawValue:)))
-    }
-
-    private func transferSelection(conflict: ConflictPolicy?) {
+    @objc private func menuTransfer() {
         let items = pane.selectedItems
         if pane.side == .local {
             guard let server = session.server else { return }
-            app.transfer(items, from: session, .local, to: session, .server, directory: server.currentPath, move: false, conflict: conflict)
+            app.transfer(items, from: session, .local, to: session, .server, directory: server.currentPath, move: false, conflict: nil)
         } else {
             guard let local = session.local else { return }
-            app.transfer(items, from: session, .server, to: session, .local, directory: local.currentPath, move: false, conflict: conflict)
+            app.transfer(items, from: session, .server, to: session, .local, directory: local.currentPath, move: false, conflict: nil)
         }
     }
 
@@ -516,14 +506,16 @@ final class FileTableCoordinator: NSObject, NSTableViewDataSource, NSTableViewDe
     @objc private func menuExtractTo() {
         guard let item = pane.selectedItems.first else { return }
         let destination: String?
+        let relays = ArchiveCenter.relays(pane)
         if pane.side == .local {
             destination = Dialogs.chooseFile(directory: URL(fileURLWithPath: pane.currentPath), canChooseDirectories: true)?.path
         } else {
-            destination = Dialogs.promptText(
-                title: "Extract to", message: "Folder on \(session.connection.name)", initial: pane.currentPath, confirm: "Extract")
+            var message = "Folder on \(session.connection.name)"
+            if relays { message += "\n\n" + ArchiveCenter.extractRelayNote(session) }
+            destination = Dialogs.promptText(title: "Extract to", message: message, initial: pane.currentPath, confirm: "Extract")
         }
         guard let destination, !destination.isEmpty else { return }
-        app.archives.extract(item, in: session, side: pane.side, to: destination, app: app)
+        app.archives.extract(item, in: session, side: pane.side, to: destination, relayConfirmed: relays, app: app)
     }
 
     @objc private func menuRename() {
@@ -540,7 +532,9 @@ final class FileTableCoordinator: NSObject, NSTableViewDataSource, NSTableViewDe
         let items = pane.selectedItems
         guard !items.isEmpty else { return }
         let what = items.count == 1 ? "\"\(items[0].name)\"" : "\(items.count) items"
-        guard Dialogs.confirm(
+        // PROD sites ask in their own confirmation; asking here as well would be two dialogs for one delete.
+        let asksOnProd = session.asksBeforeRunning(.delete, paths: items.map(\.path), side: pane.side)
+        guard asksOnProd || Dialogs.confirm(
             title: "Delete \(what)?",
             message: pane.side == .local ? "The items are moved to the Trash." : "The items are deleted from the server and cannot be recovered.",
             confirm: "Delete") else { return }
@@ -558,6 +552,23 @@ final class FileTableCoordinator: NSObject, NSTableViewDataSource, NSTableViewDe
     @objc private func menuCopyPath() {
         Dialogs.copyToPasteboard(pane.selectedItems.map(\.path).joined(separator: "\n"))
     }
+
+    /// The folder a web URL would be assigned to: the selected folder, else the current one.
+    private var webFolder: String {
+        let items = pane.selectedItems
+        return items.count == 1 && items[0].isDirectory ? items[0].path : pane.currentPath
+    }
+
+    @objc private func menuCopyWebURL() {
+        let items = pane.selectedItems
+        app.copyWebURLs(items.isEmpty ? [pane.currentPath] : items.map(\.path), folder: webFolder, in: session)
+    }
+
+    @objc private func menuOpenInBrowser() {
+        app.openInBrowser(pane.selectedItems.first?.path ?? pane.currentPath, in: session)
+    }
+
+    @objc private func menuSetWebURL() { app.editWebURL(at: webFolder, in: session) }
 
     @objc private func menuChmod() {
         let items = pane.selectedItems

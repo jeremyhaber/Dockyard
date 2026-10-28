@@ -15,7 +15,13 @@ extension AppModel {
         do { _ = try JumpChain.resolve(for: connection, lookup: jumpLookup(replacing: connection)) } catch {
             throw SiteDraftError.jump("\(error)")
         }
+        let old = try await connections.connection(id: connection.id)
         let saved = try await connections.saveEdited(connection)
+        // Saved folders belong to the old server or account (an FTP jail's "/" is the real root over SFTP),
+        // so the next connect starts in the home folder the server reports.
+        if let old, old.protocol != saved.protocol || old.host != saved.host || old.port != saved.port || old.username != saved.username {
+            try? await sessionService.startFresh(connectionId: saved.id)
+        }
         for (purpose, value) in draft.secretsToStore {
             try await secrets.setSecret(value, for: saved.id, purpose: purpose)
         }

@@ -24,16 +24,18 @@ final class ArchiveCenter {
     func compress(_ items: [RemoteItem], in session: ConnectionSession, side: PaneSide, app: AppModel) {
         guard let pane = session.pane(side), !items.isEmpty else { return }
         let suggested = items.count == 1 ? items[0].name : RemotePath.lastComponent(of: pane.currentPath)
-        guard let name = Dialogs.promptText(
-            title: "Compress", message: "Name of the archive, without an extension", initial: suggested, confirm: "Next"),
-            !name.isEmpty else { return }
+        var message = "Name of the archive, without an extension."
+        if Self.relays(pane) {
+            message += "\n\n\(session.endpoint(.server).label) has no shell, so this is relayed through this Mac: "
+                + "the items are downloaded, compressed here and the archive is uploaded."
+        }
         let formats = ArchiveFormat.creatable
-        let pick = Dialogs.choose(
-            title: "Archive format", message: "Create \(name) as:",
-            buttons: formats.map { ".\($0.fileExtension)" } + ["Cancel"])
-        guard pick < formats.count else { return }
-        let format = formats[pick]
-        let archiveName = "\(name).\(format.fileExtension)"
+        guard let answer = Dialogs.promptText(
+            title: "Compress", message: message, initial: suggested,
+            choiceLabel: "Format:", choices: formats.map { ".\($0.fileExtension)" }, confirm: "Compress"),
+            !answer.text.isEmpty, formats.indices.contains(answer.choice) else { return }
+        let format = formats[answer.choice]
+        let archiveName = "\(answer.text).\(format.fileExtension)"
         let directory = pane.currentPath
         let request = CompressRequest(
             directory: directory, names: items.map(\.name), destination: RemotePath.join(directory, archiveName), format: format)
@@ -44,14 +46,25 @@ final class ArchiveCenter {
             }
             let plan = ArchiveRelayPlan(
                 endpoint: session.endpoint(.server), operation: .compress(directory: directory, items: items, archiveName: archiveName, format: format))
-            guard Dialogs.confirm(title: "Compress through this Mac?", message: plan.summary, confirm: "Continue", destructive: false) else {
-                throw CancellationError()
-            }
             return try await plan.run(on: app.queue, service: service)
         }
     }
 
-    func extract(_ archive: RemoteItem, in session: ConnectionSession, side: PaneSide, to destination: String?, app: AppModel) {
+    /// FTP and cloud panes have no shell, so archives are made and unpacked on this Mac.
+    static func relays(_ pane: PaneModel) -> Bool {
+        pane.side != .local && !(pane.fs is any RemoteCommandRunner)
+    }
+
+    /// For the one dialog that asks about an extraction relayed through this Mac.
+    static func extractRelayNote(_ session: ConnectionSession) -> String {
+        "\(session.endpoint(.server).label) has no shell, so this is relayed through this Mac: "
+            + "the archive is downloaded, extracted here and its contents are uploaded."
+    }
+
+    /// `relayConfirmed` is true when the caller's dialog already said the work is relayed through this Mac.
+    func extract(
+        _ archive: RemoteItem, in session: ConnectionSession, side: PaneSide, to destination: String?, relayConfirmed: Bool = false, app: AppModel
+    ) {
         guard let pane = session.pane(side), ArchiveFormat.detect(fileName: archive.name) != nil else { return }
         let target = destination ?? pane.currentPath
         let request = ExtractRequest(archive: archive.path, destination: target)
@@ -61,7 +74,7 @@ final class ArchiveCenter {
                 return try await service.extract(request, on: remote)
             }
             let plan = ArchiveRelayPlan(endpoint: session.endpoint(.server), operation: .extract(archive: archive, destination: target))
-            guard Dialogs.confirm(title: "Extract through this Mac?", message: plan.summary, confirm: "Continue", destructive: false) else {
+            guard relayConfirmed || Dialogs.confirm(title: "Extract through this Mac?", message: plan.summary, confirm: "Continue", destructive: false) else {
                 throw CancellationError()
             }
             return try await plan.run(on: app.queue, service: service)

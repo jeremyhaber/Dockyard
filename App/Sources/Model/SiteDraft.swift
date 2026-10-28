@@ -97,7 +97,12 @@ struct SiteDraft {
     var connectDelayMs = 0
     var localFolder = ""
     var restoreSession = true
+    var treeRoot = FolderTreeRoot.home
     var jumpHost: UUID?
+    var webURLs: [WebURLMapping] = []
+    var icon: ConnectionIcon?
+    var color: ConnectionColor?
+    var faviconSite = ""
 
     var cloudPresetID = "s3"
     var cloudRoot = ""
@@ -155,7 +160,12 @@ struct SiteDraft {
         connectDelayMs = c.connectDelayMs
         localFolder = c.localFolder ?? ""
         restoreSession = c.restoreSession
+        treeRoot = c.treeRoot
         jumpHost = c.jumpHost
+        webURLs = c.webURLs
+        icon = c.icon
+        color = c.color
+        faviconSite = c.faviconSite ?? ""
         if let cloud = c.cloud {
             cloudPresetID = CloudPreset.preset(for: cloud)?.id ?? "s3"
             cloudRoot = cloud.root
@@ -228,7 +238,13 @@ struct SiteDraft {
         c.connectDelayMs = max(0, connectDelayMs)
         c.localFolder = localFolder.trimmingCharacters(in: .whitespaces).isEmpty ? nil : localFolder
         c.restoreSession = restoreSession
+        c.treeRoot = treeRoot
         c.jumpHost = proto == .sftp ? jumpHost : nil
+        c.webURLs = webURLs
+        c.icon = icon
+        c.color = color
+        let site = faviconSite.trimmingCharacters(in: .whitespaces)
+        c.faviconSite = site.isEmpty ? nil : site
         c.cloud = isCloud ? cloudPreset.spec(root: cloudRoot, region: cloudRegion) : nil
         c.agentSocket = agentSocket(for: proto)
         c.secretReferences = try secretReferences()

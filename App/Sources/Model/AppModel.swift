@@ -80,7 +80,12 @@ final class AppModel {
     private(set) var startupError: String?
 
     private(set) var sessions: [ConnectionSession] = []
-    var activeSessionID: UUID?
+    var activeSessionID: UUID? {
+        // A grouped tab shows its whole group side by side.
+        didSet {
+            if let id = activeSessionID, let groupID = sessionGroups[id] { noteGroupActivation(groupID, session: id) }
+        }
+    }
     private(set) var allConnections: [Connection] = []
     private(set) var connectionsRevision = 0
     private(set) var clientNames: [UUID: String] = [:]
@@ -97,10 +102,29 @@ final class AppModel {
     private(set) var quickConnectFocusToken = 0
     private(set) var quickHistory: [QuickConnectHistoryEntry] = []
 
-    var layoutMode: LayoutMode = .localServer
-    /// Session ids shown as columns in the side-by-side layout.
-    var columnIDs: [UUID] = []
+    /// Relative widths of the side-by-side columns by session id; 1 when unset.
+    var columnWeights: [UUID: Double] = [:]
     var localRailExpanded = false
+    /// Width of the expanded local pane in side by side.
+    var localPaneWidth = UserDefaults.standard.object(forKey: "localPaneWidth") as? Double ?? LocalPaneLayout.defaultWidth {
+        didSet { UserDefaults.standard.set(localPaneWidth, forKey: "localPaneWidth") }
+    }
+    /// Named tab groups, saved with their connections so a closed group can be reopened.
+    var tabGroups: [TabGroup] = TabGroup.loadSaved() {
+        didSet { TabGroup.save(tabGroups) }
+    }
+    /// The group each open tab belongs to, by session id.
+    var sessionGroups: [UUID: UUID] = [:]
+    /// The tab last active in each group, so showing a group returns to it.
+    @ObservationIgnored var groupLastActive: [UUID: UUID] = [:]
+    /// The tab or column header being dragged to a new place; stale after a cancelled drag, which is harmless.
+    @ObservationIgnored var draggedSessionID: UUID?
+    /// The sidebar shows only site icons and expands over the content on hover.
+    var sidebarCollapsed = UserDefaults.standard.bool(forKey: "sidebarCollapsed") {
+        didSet { UserDefaults.standard.set(sidebarCollapsed, forKey: "sidebarCollapsed") }
+    }
+    /// The "Web URL for folder" sheet over the main window.
+    var webURLRequest: WebURLRequest?
     var dropHint: DropHint?
     var compareVisible = false
     var toasts: [Toast] = []
@@ -253,9 +277,11 @@ final class AppModel {
 
     var favorites: [Connection] { allConnections.filter(\.favorite) }
 
-    var recents: [Connection] {
+    var recents: [Connection] { recents(excluding: []) }
+
+    func recents(excluding ids: Set<UUID>) -> [Connection] {
         allConnections
-            .filter { $0.lastConnectedAt != nil || $0.isNew }
+            .filter { ($0.lastConnectedAt != nil || $0.isNew) && !ids.contains($0.id) }
             .sorted { ($0.lastConnectedAt ?? $0.createdAt) > ($1.lastConnectedAt ?? $1.createdAt) }
             .prefix(6).map { $0 }
     }
@@ -360,7 +386,10 @@ final class AppModel {
         let session = ConnectionSession(connection: connection)
         registerTransferSite(connection)
         session.onSessionChange = { [weak self] in self?.persist($0) }
+        // A new tab joins the group on screen, like a link opened from a Chrome tab group.
+        let joining = activeGroupID
         sessions.append(session)
+        if let joining { setGroup(session, to: joining) }
         activeSessionID = session.id
         connections.openConnections.open(connection.id)
         startConnect(session, initialPath: initialPath, skipRestore: false)
@@ -423,14 +452,22 @@ final class AppModel {
             await flush(session)
             await edits.stopAll(connectionID: session.connection.id)
             await session.teardown()
-            columnIDs.removeAll { $0 == session.id }
+            columnWeights[session.id] = nil
+            let sibling = leaveGroupOnClose(session)
             safety.forget(session)
             sessions.removeAll { $0.id == session.id }
             if !sessions.contains(where: { $0.connection.id == session.connection.id }) {
                 connections.openConnections.close(session.connection.id)
             }
-            if activeSessionID == session.id { activeSessionID = sessions.last?.id }
+            if activeSessionID == session.id { activeSessionID = sibling ?? sessions.last?.id }
         }
+    }
+
+    /// Moves a tab to `index` in the tab order without it. Callers keep each group's tabs together.
+    func placeSession(_ id: UUID, at index: Int) {
+        guard let from = sessions.firstIndex(where: { $0.id == id }) else { return }
+        let session = sessions.remove(at: from)
+        sessions.insert(session, at: min(max(index, 0), sessions.count))
     }
 
     private func flush(_ session: ConnectionSession) async {
@@ -505,6 +542,7 @@ final class AppModel {
     private func finishConnect(_ session: ConnectionSession, fs: any RemoteFileSystem, initialPath: String?, skipRestore: Bool) async {
         let c = session.connection
         try? await connections.markConnected(c.id)
+        if c.icon == nil { FaviconStore.shared.refresh(FaviconCandidates.origins(for: c)) }
         session.setBrowsingAsRoot(await Self.isBrowsingAsRoot(fs))
         let home = (try? await fs.homeDirectory()) ?? "/"
         var localHome = DemoMode.isEnabled ? "/Users/demo" : (AppSettings.localFolder ?? NSHomeDirectory())
@@ -534,7 +572,8 @@ final class AppModel {
             serverState = PaneState(initialPath: serverStart, rules: rules)
             localState = PaneState(initialPath: localHome)
         }
-        let server = PaneModel(side: .server, fs: fs, state: serverState, home: home)
+        let treeRoot = c.cloud == nil ? c.treeRoot.path(home: home) : "/"
+        let server = PaneModel(side: .server, fs: fs, state: serverState, home: home, treeRoot: treeRoot)
         let local = PaneModel(side: .local, fs: session.localFS, state: localState, home: NSHomeDirectory())
         let history = self.history
         let id = c.id
