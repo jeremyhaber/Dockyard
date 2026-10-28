@@ -12,9 +12,13 @@ A free, native macOS file-transfer client (SFTP, FTP/FTPS, and cloud storage thr
 - **Transfers**: a persistent queue that handles 100,000+ items, per-site connection limits, FileZilla-style overwrite rules, a Transfers tab with Active/Queued/Failed/Done, and a launch prompt for leftover transfers.
 - **SSH**: libssh2 with key, password, keyboard-interactive, ssh-agent and 1Password SSH agent; jump hosts; a terminal drawer with su/sudo; browse files as root.
 - **Safety**: undo for moves and renames, optional versions on overwrite, PROD confirmations and read-only sites, optional checksums.
-- **More**: servers side by side, compare/sync, zip/tar/extract on the server, remote search, watch folders, edit in your own editor, Quick Look, encrypted export, mount as a drive in Finder.
+- **More**: servers side by side, compare/sync, zip/tar/extract on the server, remote search, watch folders, edit in your own editor, Quick Look, encrypted export. Mounting as a drive in Finder is built but needs an Apple Developer ID build, so it is not in the downloads yet.
 
 Requires macOS 14+. Swift 6, SwiftUI + AppKit.
+
+## Download
+
+Get `Dockyard-X.Y.Z.zip` from [Releases](https://github.com/jeremyhaber/Dockyard/releases/latest), unzip it and move Dockyard to Applications. Releases are signed with a self-signed certificate rather than an Apple one, so the first launch is blocked: open Dockyard once, then go to System Settings, Privacy & Security and click **Open Anyway** (or run `xattr -dr com.apple.quarantine /Applications/Dockyard.app`). Later versions install through Dockyard, Check for Updates.
 
 ## Screenshots
 
