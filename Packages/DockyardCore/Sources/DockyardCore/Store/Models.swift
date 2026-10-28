@@ -46,7 +46,7 @@ public enum ConnectionSource: Sendable, Hashable, RawRepresentable {
 
 /// Connection fields the user can edit that a sync must not clobber.
 public enum UserEditableField: String, Sendable, Hashable, Codable, CaseIterable {
-    case name, notes, host, port
+    case name, notes, host, port, faviconSite, webURLs
 }
 
 /// Backend settings for `rclone` connections. Mirrors `RcloneRemoteSpec` with plain strings so this module
@@ -142,6 +142,9 @@ public struct Connection: Sendable, Hashable, Identifiable {
 
     /// Which ssh-agent the `.agent` auth method uses.
     public var agentSocket: AgentSocket
+    /// SFTP only: the user SSH logs in as (root) when that differs from `username`. Files, commands and shells
+    /// then run as `username`. Set for WHM accounts reached through root.
+    public var loginUser: String? = nil
     /// Secret references per purpose (`op://Vault/Item/password`), resolved at connect time instead of reading the Keychain.
     /// References are not secrets, but keep them out of logs.
     public var secretReferences: [SecretPurpose: String]
@@ -261,8 +264,9 @@ public struct Connection: Sendable, Hashable, Identifiable {
     /// The `ConnectionKit` view of this connection.
     public var config: ConnectionConfig {
         ConnectionConfig(
-            id: id, protocol: `protocol`, host: host, port: port, username: username,
-            authMethods: authMethods, keyPath: keyPath, elevation: elevation, agentSocket: agentSocket
+            id: id, protocol: `protocol`, host: host, port: port, username: loginUser ?? username,
+            authMethods: authMethods, keyPath: keyPath, elevation: elevation, agentSocket: agentSocket,
+            runAs: loginUser == nil ? nil : username
         )
     }
 
@@ -344,6 +348,7 @@ extension Connection: FetchableRecord, PersistableRecord, TableRecord {
             onePasswordItemId: row["onePasswordItemId"],
             deletedAt: row["deletedAt"]
         )
+        loginUser = row["loginUser"]
     }
 
     private static func decodeReferences(_ json: String?) -> [SecretPurpose: String] {
@@ -414,6 +419,7 @@ extension Connection: FetchableRecord, PersistableRecord, TableRecord {
             as: UTF8.self)
         container["onePasswordItemId"] = onePasswordItemId
         container["deletedAt"] = deletedAt
+        container["loginUser"] = loginUser
     }
 
     private static func decodeJSON<T: Decodable>(_ text: String, default fallback: T) -> T {
@@ -544,14 +550,18 @@ public struct WHMSource: Sendable, Hashable, Identifiable {
     public var apiTokenKeychainRef: String
     public var lastSyncAt: Date?
     public var lastSyncError: String?
+    /// How the accounts this server creates log in.
+    public var accountLogin: WHMAccountLogin
 
     public init(
         id: UUID = UUID(), label: String, host: String, apiPort: Int = 2087, apiUser: String = "root",
-        apiTokenKeychainRef: String = "", lastSyncAt: Date? = nil, lastSyncError: String? = nil
+        apiTokenKeychainRef: String = "", lastSyncAt: Date? = nil, lastSyncError: String? = nil,
+        accountLogin: WHMAccountLogin = .password
     ) {
         self.id = id; self.label = label; self.host = host; self.apiPort = apiPort; self.apiUser = apiUser
         self.apiTokenKeychainRef = apiTokenKeychainRef.isEmpty ? id.uuidString : apiTokenKeychainRef
         self.lastSyncAt = lastSyncAt; self.lastSyncError = lastSyncError
+        self.accountLogin = accountLogin
     }
 }
 
@@ -562,7 +572,8 @@ extension WHMSource: FetchableRecord, PersistableRecord, TableRecord {
         self.init(
             id: UUID(uuidString: s) ?? UUID(), label: row["label"], host: row["host"], apiPort: row["apiPort"],
             apiUser: row["apiUser"], apiTokenKeychainRef: row["apiTokenKeychainRef"],
-            lastSyncAt: row["lastSyncAt"], lastSyncError: row["lastSyncError"]
+            lastSyncAt: row["lastSyncAt"], lastSyncError: row["lastSyncError"],
+            accountLogin: (row["accountLogin"] as String?).flatMap(WHMAccountLogin.init(rawValue:)) ?? .password
         )
     }
     public func encode(to container: inout PersistenceContainer) throws {
@@ -574,6 +585,7 @@ extension WHMSource: FetchableRecord, PersistableRecord, TableRecord {
         container["apiTokenKeychainRef"] = apiTokenKeychainRef
         container["lastSyncAt"] = lastSyncAt
         container["lastSyncError"] = lastSyncError
+        container["accountLogin"] = accountLogin.rawValue
     }
 }
 

@@ -93,7 +93,7 @@ struct OnePasswordImportSheet: View {
                         get: { model.selectedVaults.contains(vault.id) },
                         set: { if $0 { model.selectedVaults.insert(vault.id) } else { model.selectedVaults.remove(vault.id) } })
                     ) {
-                        Label(vault.name, systemImage: "lock.rectangle.stack")
+                        Label(vault.displayName, systemImage: "lock.rectangle.stack")
                     }
                     .toggleStyle(.checkbox)
                 }

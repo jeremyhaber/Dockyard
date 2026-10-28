@@ -9,6 +9,7 @@ enum AppSettings {
     static let defaultLocalFolder = "defaultLocalFolder"
     static let finderPollSeconds = AppGroup.pollIntervalKey
     static let whmSyncHours = "whmSyncHours"
+    static let editorApp = "editorApp"
 
     static let launchLeftovers = "launchLeftovers"
     static let defaultConflict = "defaultConflict"
@@ -54,6 +55,13 @@ enum AppSettings {
         guard let path = UserDefaults.standard.string(forKey: defaultLocalFolder), !path.isEmpty,
               FileManager.default.fileExists(atPath: path) else { return nil }
         return path
+    }
+
+    /// The app chosen to edit files in, or nil to use each file's default app.
+    static var editorURL: URL? {
+        guard let path = UserDefaults.standard.string(forKey: editorApp), !path.isEmpty,
+              FileManager.default.fileExists(atPath: path) else { return nil }
+        return URL(fileURLWithPath: path)
     }
 
     static var whmSyncInterval: TimeInterval {

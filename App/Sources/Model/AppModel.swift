@@ -174,7 +174,7 @@ final class AppModel {
         self.knownHosts = KnownHostRepository(database: db)
         self.snippets = SnippetRepository(database: db)
         self.journal = ChangeJournal(database: db)
-        self.secrets = secrets
+        self.secrets = WHMPassphraseStore(base: secrets, connections: repo, sources: sources)
         self.resolvingSecrets = secrets
         self.keychainSecrets = keychain
         self.onePassword = onePassword
@@ -789,15 +789,30 @@ final class AppModel {
         }
     }
 
-    func addWHMSource(label: String, host: String, port: Int, apiUser: String, token: String) async -> String {
-        let source = WHMSource(label: label.isEmpty ? host : label, host: host, apiPort: port, apiUser: apiUser)
+    func addWHMSource(
+        label: String, host: String, port: Int, apiUser: String, token: String, login: WHMAccountLogin, passphrase: String
+    ) async -> String {
+        let source = WHMSource(label: label.isEmpty ? host : label, host: host, apiPort: port, apiUser: apiUser, accountLogin: login)
         do {
             try await whmSources.save(source)
             try await WHMSyncService.storeToken(token, for: source, in: secrets)
+            if !passphrase.isEmpty { try await secrets.setSecret(passphrase, for: source.id, purpose: .keyPassphrase) }
             let report = try await whmSync.sync(source)
             return "Synced \(report.accountCount) accounts: \(report.created) new, \(report.updated) updated, \(report.removed) removed."
         } catch {
             return "Saved the server, but the first sync failed: \(error.userMessage)"
+        }
+    }
+
+    /// Saves an edited WHM server. A new token or passphrase replaces the stored one; empty fields keep it.
+    func updateWHMSource(_ source: WHMSource, token: String, passphrase: String) async -> String {
+        do {
+            if !token.isEmpty { try await WHMSyncService.storeToken(token, for: source, in: secrets) }
+            if !passphrase.isEmpty { try await secrets.setSecret(passphrase, for: source.id, purpose: .keyPassphrase) }
+            let moved = try await whmSync.save(source)
+            return moved == 0 ? "Saved." : "Saved. \(moved) \(moved == 1 ? "account now logs" : "accounts now log") in the new way."
+        } catch {
+            return "Could not save the server: \(error.userMessage)"
         }
     }
 

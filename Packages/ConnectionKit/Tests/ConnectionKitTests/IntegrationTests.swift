@@ -13,6 +13,9 @@ enum Env {
     static let bothPort = 2223
     static let kbdPort = 2224
     static let slowPort = 2225
+    static let rootPort = 2226
+    /// An account on the root-login port with no login shell, like a cPanel account without shell access.
+    static let accountUser = "cpuser"
     static let rootPassword = "root-test-pw"
     static let ftpPort = 2121
     static let vsftpdPort = 2122
@@ -171,6 +174,18 @@ func exercise(_ fs: any RemoteFileSystem, supportsPermissions: Bool = true, miss
         #expect(lines.contains { $0.message.contains("Authenticated with password") })
         #expect(lines.contains { $0.message.hasPrefix("rename ") })
         #expect(!lines.contains { $0.message.contains(Env.password) })
+    }
+
+    @Test func reconnectsAfterDroppedConnection() async throws {
+        let config = sftpConfig(auth: .password)
+        let fs = SFTPFileSystem(config: config, secrets: await store(for: config))
+        try await fs.connect()
+        _ = try await fs.list("/")
+        // Kill this connection's sshd process from the server side, as an idle timeout or network change would.
+        _ = try? await fs.exec("kill -9 $PPID")
+        // The next listing reconnects transparently, even though the session only learns it is dead on this call.
+        _ = try await fs.list("/")
+        await fs.disconnect()
     }
 
     @Test(arguments: [("id_ed25519", nil), ("id_ed25519_enc", Env.keyPassphrase)] as [(String, String?)])

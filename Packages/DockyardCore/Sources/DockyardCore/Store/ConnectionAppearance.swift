@@ -22,13 +22,15 @@ public enum ConnectionColor: String, Sendable, Hashable, Codable, CaseIterable {
 public enum FaviconCandidates {
     /// The chosen icon website, then the host itself, each parent domain down to the registrable one
     /// (`test.acme.co.uk`, `acme.co.uk`), then the origins of the web URLs.
-    /// Cloud connections, IP addresses and single-label hosts skip the host step.
+    /// Cloud connections, IP addresses and single-label hosts skip the host step, and so do WHM accounts, whose
+    /// host is the shared server rather than the account's site.
     public static func origins(for connection: Connection) -> [String] {
         var out: [String] = []
         if let site = connection.faviconSite.flatMap(WebURLResolver.normalizeBase), let origin = origin(of: site) {
             out.append(origin)
         }
-        if connection.protocol != .rclone { out += hostOrigins(connection.host) }
+        let sharedServer = connection.source.whmServerId != nil && !connection.userEditedFields.contains(.host)
+        if connection.protocol != .rclone, !sharedServer { out += hostOrigins(connection.host) }
         for mapping in connection.webURLs {
             guard let base = WebURLResolver.normalizeBase(mapping.baseURL), let origin = origin(of: base) else { continue }
             out.append(origin)

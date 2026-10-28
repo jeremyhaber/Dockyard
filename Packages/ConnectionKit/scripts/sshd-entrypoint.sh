@@ -3,10 +3,13 @@
 #   2222  publickey or password
 #   2223  AuthenticationMethods publickey,password (both on one connection)
 #   2224  keyboard-interactive only (PAM)
-# PUBLIC_KEY: authorized_keys content for user dockyard.
+#   2226  root by public key only (the account cpuser has no login shell)
+# PUBLIC_KEY: authorized_keys content for users dockyard and root.
 set -e
 printf '%s\n' "$PUBLIC_KEY" > /etc/ssh/authorized_keys/dockyard
 chmod 644 /etc/ssh/authorized_keys/dockyard
+printf '%s\n' "$PUBLIC_KEY" > /etc/ssh/authorized_keys/root
+chmod 644 /etc/ssh/authorized_keys/root
 
 common='UsePAM yes
 PermitRootLogin no
@@ -38,5 +41,14 @@ AuthenticationMethods keyboard-interactive
 $common
 EOF
 
-for port in 2222 2223 2224; do /usr/sbin/sshd -f /etc/ssh/sshd_$port.conf -E /var/log/sshd_$port.log; done
+# The first PermitRootLogin wins, so this overrides the one in $common.
+cat > /etc/ssh/sshd_2226.conf <<EOF
+Port 2226
+PermitRootLogin prohibit-password
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+$common
+EOF
+
+for port in 2222 2223 2224 2226; do /usr/sbin/sshd -f /etc/ssh/sshd_$port.conf -E /var/log/sshd_$port.log; done
 exec tail -F /var/log/sshd_2222.log

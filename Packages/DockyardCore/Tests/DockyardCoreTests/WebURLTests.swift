@@ -93,4 +93,13 @@ import ConnectionKit
         let cloud = Connection(name: "S3", protocol: .rclone, host: "s3.amazonaws.com", username: "")
         #expect(FaviconCandidates.origins(for: cloud).isEmpty)
     }
+
+    @Test func whmAccountsSkipTheSharedServer() {
+        var c = Connection(name: "acme.com", protocol: .sftp, host: "host.hosting.example", username: "acme", source: .whm(UUID()))
+        c.faviconSite = "acme.com"
+        #expect(FaviconCandidates.origins(for: c) == ["https://acme.com"])
+        c.userEditedFields.insert(.host)
+        c.host = "acme.com"
+        #expect(FaviconCandidates.origins(for: c) == ["https://acme.com"])
+    }
 }

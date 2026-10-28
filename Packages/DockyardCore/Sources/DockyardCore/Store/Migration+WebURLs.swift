@@ -37,4 +37,27 @@ extension DatabaseMigrator {
             }
         }
     }
+
+    /// How a WHM server's accounts log in (password, one key, an agent, or through root), and the login user
+    /// that reaching an account through root needs.
+    mutating func registerWHMAccountLoginMigration() {
+        registerMigration("v_whm_account_login") { db in
+            try db.alter(table: "whmSource") { t in
+                t.add(column: "accountLogin", .text).notNull().defaults(to: "password")
+            }
+            try db.alter(table: "connection") { t in
+                t.add(column: "loginUser", .text)
+            }
+        }
+    }
+
+    /// Databases that ran an early `v_whm_account_login`, before it added `loginUser`, lack the column.
+    mutating func registerLoginUserRepairMigration() {
+        registerMigration("v_connection_login_user") { db in
+            guard try !db.columns(in: "connection").contains(where: { $0.name == "loginUser" }) else { return }
+            try db.alter(table: "connection") { t in
+                t.add(column: "loginUser", .text)
+            }
+        }
+    }
 }

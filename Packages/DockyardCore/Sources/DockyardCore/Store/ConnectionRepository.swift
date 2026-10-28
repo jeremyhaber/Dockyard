@@ -138,6 +138,8 @@ public final class ConnectionRepository: Sendable {
                 if old.notes != edited.notes { updated.userEditedFields.insert(.notes) }
                 if old.host != edited.host { updated.userEditedFields.insert(.host) }
                 if old.port != edited.port { updated.userEditedFields.insert(.port) }
+                if old.faviconSite != edited.faviconSite { updated.userEditedFields.insert(.faviconSite) }
+                if old.webURLs != edited.webURLs { updated.userEditedFields.insert(.webURLs) }
             }
             try updated.save(db)
             return updated

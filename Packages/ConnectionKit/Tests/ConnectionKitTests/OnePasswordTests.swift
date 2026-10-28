@@ -103,6 +103,75 @@ func makeCLI(_ fake: FakeOp, account: String? = nil, log: @escaping @Sendable (S
         await #expect(throws: OnePasswordError.commandFailed(exitCode: 2, message: "something exploded")) { try await cli.status() }
     }
 
+    @Test func statusAsksForAuthorizationWhenThereIsNoSessionYet() async throws {
+        let fake = FakeOp { invocation in
+            switch invocation.arguments.first {
+            case "account": opOK(OPFixtures.accounts)
+            case "whoami": opFail("[ERROR] 2026/01/02 10:00:00 account is not signed in")
+            default: opOK(OPFixtures.vaults)
+            }
+        }
+        #expect(try await makeCLI(fake).status().isReady)
+        #expect(fake.arguments.last == ["vault", "list", "--format", "json"])
+    }
+
+    // MARK: Several accounts
+
+    static let twoAccounts = """
+    [{"url":"work.1password.com","email":"a@example.com","user_uuid":"U1","account_uuid":"WORK"},
+     {"url":"my.1password.com","email":"b@example.com","user_uuid":"U2","account_uuid":"HOME"}]
+    """
+    static let severalAccounts = "[ERROR] 2026/01/02 10:00:00 multiple accounts found. Use the --account flag or set the OP_ACCOUNT environment variable to select an account."
+
+    /// Answers `handler(account)` for calls naming an account, and the multiple-accounts error for those that name none.
+    static func twoAccountOp(_ handler: @escaping @Sendable (_ arguments: [String], _ account: String) -> CommandResult) -> FakeOp {
+        FakeOp { invocation in
+            let arguments = invocation.arguments
+            if arguments.first == "account" { return opOK(twoAccounts) }
+            guard let flag = arguments.firstIndex(of: "--account") else { return opFail(severalAccounts) }
+            return handler(Array(arguments[..<flag]), arguments[flag + 1])
+        }
+    }
+
+    @Test func statusChecksEachAccountWhenSeveralAreSignedIn() async throws {
+        let fake = Self.twoAccountOp { _, account in
+            account == "HOME" ? opOK(OPFixtures.whoami) : opFail("[ERROR] 2026/01/02 10:00:00 account is not signed in")
+        }
+        let status = try await makeCLI(fake).status()
+        guard case .ready(let accounts) = status else { Issue.record("expected ready, got \(status)"); return }
+        #expect(accounts.map(\.id) == ["WORK", "HOME"])
+    }
+
+    @Test func readTriesEachAccountUntilOneHasTheItem() async throws {
+        let fake = Self.twoAccountOp { _, account in
+            account == "HOME" ? opOK("s3cret") : opFail("[ERROR] 2026/01/02 10:00:00 \"Acme\" isn't an item in the \"Private\" vault")
+        }
+        #expect(try await makeCLI(fake).read(reference: "op://Private/Acme/password") == "s3cret")
+        #expect(fake.arguments.compactMap { arguments in arguments.firstIndex(of: "--account").map { arguments[$0 + 1] } } == ["WORK", "HOME"])
+    }
+
+    @Test func readStopsWhenAuthorizationIsDismissed() async throws {
+        let fake = Self.twoAccountOp { _, _ in opFail("[ERROR] 2026/01/02 10:00:00 authorization prompt dismissed, please try again") }
+        await #expect(throws: OnePasswordError.authorizationDismissed) { try await makeCLI(fake).read(reference: "op://Private/Acme/password") }
+        #expect(fake.arguments.filter { $0.contains("--account") }.count == 1)
+    }
+
+    @Test func vaultsComeFromEveryAccountAndItemsUseTheirAccount() async throws {
+        let fake = Self.twoAccountOp { arguments, account in
+            switch (arguments.first, account) {
+            case ("vault", "WORK"): opOK(#"[{"id":"w1","name":"Private"}]"#)
+            case ("vault", _): opOK(#"[{"id":"h1","name":"Private"}]"#)
+            case ("item", "HOME"): opOK(OPFixtures.itemList)
+            default: opFail("[ERROR] 2026/01/02 10:00:00 wrong account")
+            }
+        }
+        let cli = makeCLI(fake)
+        let vaults = try await cli.vaults()
+        #expect(vaults.map(\.displayName) == ["Private (work.1password.com)", "Private (my.1password.com)"])
+        #expect(try await cli.items(inVault: "h1").count == 2)
+        #expect(fake.arguments.last?.suffix(2) == ["--account", "HOME"])
+    }
+
     // MARK: Listing
 
     @Test func listsVaults() async throws {

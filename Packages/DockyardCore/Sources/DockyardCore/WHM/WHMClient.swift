@@ -26,6 +26,22 @@ public struct WHMAccount: Sendable, Equatable {
     }
 }
 
+/// One domain from WHM API 1 `get_domain_info`: which account owns it and the folder it serves.
+public struct WHMDomain: Sendable, Equatable {
+    public enum Kind: String, Sendable {
+        case main, addon, sub, parked
+    }
+
+    public var user: String
+    public var domain: String
+    public var kind: Kind
+    public var docroot: String
+
+    public init(user: String, domain: String, kind: Kind, docroot: String) {
+        self.user = user; self.domain = domain; self.kind = kind; self.docroot = docroot
+    }
+}
+
 public enum WHMError: Error, Equatable, CustomStringConvertible {
     case invalidURL
     case unauthorized
@@ -101,13 +117,15 @@ public struct WHMClient: Sendable {
         self.host = host; self.port = port; self.apiUser = apiUser; self.token = token; self.transport = transport
     }
 
-    /// Builds the request. The token only ever appears in the `Authorization` header.
-    func listAccountsRequest() throws -> URLRequest {
+    func listAccountsRequest() throws -> URLRequest { try request("listaccts") }
+
+    /// Builds the request for a WHM API 1 function. The token only ever appears in the `Authorization` header.
+    func request(_ function: String) throws -> URLRequest {
         var comps = URLComponents()
         comps.scheme = "https"
         comps.host = host
         comps.port = port
-        comps.path = "/json-api/listaccts"
+        comps.path = "/json-api/\(function)"
         comps.queryItems = [URLQueryItem(name: "api.version", value: "1")]
         guard !host.isEmpty, !host.contains("/"), let url = comps.url else { throw WHMError.invalidURL }
         var req = URLRequest(url: url)
@@ -119,6 +137,11 @@ public struct WHMClient: Sendable {
 
     public func listAccounts() async throws -> [WHMAccount] {
         try Self.parse(try await perform(try listAccountsRequest()))
+    }
+
+    /// Every domain on the server with its owner and document root.
+    public func listDomains() async throws -> [WHMDomain] {
+        try Self.parseDomains(try await perform(try request("get_domain_info")))
     }
 
     /// Sends a request and maps transport failures and HTTP errors; returns the body of a 2xx reply.
@@ -163,6 +186,24 @@ public struct WHMClient: Sendable {
                 suspendReason: suspended ? Self.nonEmpty(a["suspendreason"]) : nil,
                 diskUsed: Self.nonEmpty(a["diskused"]),
                 startDate: Self.int(a["unix_startdate"]).map { Date(timeIntervalSince1970: TimeInterval($0)) })
+        }
+    }
+
+    /// Parses a `get_domain_info` JSON body. Rows without a user, domain or document root are skipped.
+    public static func parseDomains(_ data: Data) throws -> [WHMDomain] {
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw WHMError.invalidResponse("not a JSON object")
+        }
+        if let meta = root["metadata"] as? [String: Any], let result = Self.int(meta["result"]), result == 0 {
+            throw WHMError.api((meta["reason"] as? String) ?? "unknown error")
+        }
+        guard let payload = root["data"] as? [String: Any] else { throw WHMError.invalidResponse("missing data") }
+        guard let list = payload["domains"] as? [[String: Any]] else { return [] }
+        return list.compactMap { d in
+            guard let user = Self.nonEmpty(d["user"]), let domain = Self.nonEmpty(d["domain"]),
+                  let docroot = Self.nonEmpty(d["docroot"]),
+                  let kind = (d["domain_type"] as? String).flatMap(WHMDomain.Kind.init(rawValue:)) else { return nil }
+            return WHMDomain(user: user, domain: domain, kind: kind, docroot: docroot)
         }
     }
 

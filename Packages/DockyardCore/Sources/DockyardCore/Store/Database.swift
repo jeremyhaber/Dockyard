@@ -174,6 +174,8 @@ public final class DockyardDatabase: Sendable {
         migrator.registerConnectionColorMigration()
         migrator.registerFaviconSiteMigration()
         migrator.registerTreeRootMigration()
+        migrator.registerWHMAccountLoginMigration()
+        migrator.registerLoginUserRepairMigration()
         return migrator
     }
 }

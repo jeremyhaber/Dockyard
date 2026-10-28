@@ -49,7 +49,8 @@ extension AppModel {
         let store = ResolvingSecretStore(
             fallback: ungatedSecrets, references: connections, resolver: onePassword.cli,
             options: ResolvingSecretStore.Options(cacheTTL: 60))
-        let environment = HealthEnvironment.make(secrets: store, knownHosts: knownHosts, connections: allConnections)
+        let sharedPassphrases = WHMPassphraseStore(base: store, connections: connections, sources: whmSources)
+        let environment = HealthEnvironment.make(secrets: sharedPassphrases, knownHosts: knownHosts, connections: allConnections)
         return HealthPlan(runnable: runnable, earlier: earlier, environment: environment)
     }
 

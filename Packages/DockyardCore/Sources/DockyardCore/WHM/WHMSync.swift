@@ -24,10 +24,25 @@ public enum WHMMerge {
         return lines.joined(separator: "\n")
     }
 
+    /// Website folders for `user`: the main domain, then addon and subdomains by name. Parked domains share the
+    /// main domain's folder and are left out, as is any second domain for a folder already mapped.
+    public static func webURLs(for user: String, in domains: [WHMDomain]) -> [WebURLMapping] {
+        let order: [WHMDomain.Kind: Int] = [.main: 0, .addon: 1, .sub: 2]
+        let mine = domains
+            .filter { $0.user == user && $0.kind != .parked }
+            .sorted { (order[$0.kind] ?? 3, $0.domain) < (order[$1.kind] ?? 3, $1.domain) }
+        var seen = Set<String>()
+        return mine.compactMap { d in
+            let mapping = WebURLMapping(path: d.docroot, baseURL: "https://\(d.domain)")
+            return seen.insert(mapping.path).inserted ? mapping : nil
+        }
+    }
+
     /// Pure merge of a `listaccts` result into the connections already stored for this WHM server.
-    /// Returns only the connections that need saving.
+    /// With `domains` (from `get_domain_info`), website URLs not edited by the user follow the account's domains;
+    /// nil leaves them as they are. Returns only the connections that need saving.
     public static func merge(
-        accounts: [WHMAccount], source: WHMSource, existing: [Connection], now: Date
+        accounts: [WHMAccount], domains: [WHMDomain]? = nil, source: WHMSource, existing: [Connection], now: Date
     ) -> (changed: [Connection], report: WHMSyncReport) {
         var report = WHMSyncReport()
         var changed: [Connection] = []
@@ -41,13 +56,17 @@ public enum WHMMerge {
             report.accountCount += 1
             let wantedName = account.domain.isEmpty ? account.user : account.domain
             let wantedNotes = notes(for: account)
+            let wantedIconSite = account.domain.isEmpty ? nil : account.domain
 
             guard var c = byUser[account.user] else {
                 var tags: [String] = []
                 if account.suspended { tags.append(suspendedTag) }
-                changed.append(Connection(
+                var created = Connection(
                     name: wantedName, protocol: .sftp, host: source.host, port: 22, username: account.user,
-                    authMethods: .password, tags: tags, notes: wantedNotes, source: .whm(source.id), createdAt: now))
+                    tags: tags, notes: wantedNotes, source: .whm(source.id), createdAt: now, faviconSite: wantedIconSite)
+                source.accountLogin.apply(to: &created)
+                if let domains { created.webURLs = webURLs(for: account.user, in: domains) }
+                changed.append(created)
                 report.created += 1
                 continue
             }
@@ -57,6 +76,8 @@ public enum WHMMerge {
             if !c.userEditedFields.contains(.name) { c.name = wantedName }
             if !c.userEditedFields.contains(.notes) { c.notes = wantedNotes }
             if !c.userEditedFields.contains(.host) { c.host = source.host }
+            if !c.userEditedFields.contains(.faviconSite) { c.faviconSite = wantedIconSite }
+            if let domains, !c.userEditedFields.contains(.webURLs) { c.webURLs = webURLs(for: account.user, in: domains) }
             let hasTag = c.tags.contains(suspendedTag)
             if account.suspended && !hasTag { c.tags.append(suspendedTag) }
             if !account.suspended && hasTag { c.tags.removeAll { $0 == suspendedTag } }
@@ -117,8 +138,11 @@ public struct WHMSyncService: Sendable {
             let client = WHMClient(host: source.host, port: source.apiPort, apiUser: source.apiUser, token: token,
                                    transport: transportFactory(source))
             let accounts = try await client.listAccounts()
+            // Optional: a token without the privilege for it still syncs accounts, just without website URLs.
+            let domains = try? await client.listDomains()
             let existing = try await repository.fetch(ConnectionFilter(scope: .source(.whm(source.id)), includeRemoved: true))
-            let (changed, report) = WHMMerge.merge(accounts: accounts, source: source, existing: existing, now: clock.now())
+            let (changed, report) = WHMMerge.merge(
+                accounts: accounts, domains: domains, source: source, existing: existing, now: clock.now())
             try await repository.save(changed)
             var updated = source
             updated.lastSyncAt = clock.now()
@@ -131,6 +155,19 @@ public struct WHMSyncService: Sendable {
             try? await sources.save(failed)
             throw error
         }
+    }
+
+    /// Saves `source` (with its new `accountLogin`) and moves the accounts still using the stored login to the new one.
+    /// Returns how many accounts changed.
+    @discardableResult
+    public func save(_ source: WHMSource) async throws -> Int {
+        let old = try await sources.source(id: source.id)?.accountLogin ?? source.accountLogin
+        let existing = try await repository.fetch(ConnectionFilter(scope: .source(.whm(source.id)), includeRemoved: true))
+        let changed = WHMAccountLogin.relogin(existing, source: source, from: old, to: source.accountLogin)
+        // Accounts first: if moving them fails, the server keeps its old login and saving again retries.
+        try await repository.save(changed)
+        try await sources.save(source)
+        return changed.count
     }
 
     /// Syncs every configured server; one failing server does not stop the others.

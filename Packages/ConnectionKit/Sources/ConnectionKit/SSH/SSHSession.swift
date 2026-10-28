@@ -82,6 +82,11 @@ public final class SSHSession: @unchecked Sendable {
         return session
     }
 
+    /// Whether the transport is still up (false after a keepalive or socket failure).
+    var alive: Bool {
+        get async { await withCheckedContinuation { continuation in queue.async { continuation.resume(returning: self.isAlive) } } }
+    }
+
     /// Runs `body` on the session queue. libssh2 calls are only legal in here.
     func perform<T: Sendable>(requireAlive: Bool = true, _ body: @escaping @Sendable (SSHSession) throws -> T) async throws -> T {
         try await withCheckedThrowingContinuation { continuation in
@@ -341,9 +346,13 @@ public final class SSHSession: @unchecked Sendable {
     }
 
     /// Opens an interactive PTY shell on this connection. With `elevation`, `su -` or `sudo -i` is typed
-    /// and its password prompt answered without showing the password.
-    public func openShell(cols: Int, rows: Int, elevation: ShellElevation? = nil) async throws -> ShellChannel {
-        try await perform { session in
+    /// and its password prompt answered without showing the password. With `runAs` (a root login), the shell
+    /// switches to that user instead.
+    public func openShell(cols: Int, rows: Int, elevation: ShellElevation? = nil, runAs: String? = nil) async throws -> ShellChannel {
+        if let runAs, !Self.isValidAccountName(runAs) {
+            throw RemoteError.invalidConfiguration("\"\(runAs)\" is not a valid account name")
+        }
+        return try await perform { session in
             let channel = try session.newChannel()
             do {
                 try channel.requestPTY(cols: cols, rows: rows)
@@ -352,7 +361,7 @@ public final class SSHSession: @unchecked Sendable {
                 channel.close()
                 throw error
             }
-            let shell = ShellChannel(session: session, channel: channel, elevation: elevation)
+            let shell = ShellChannel(session: session, channel: channel, elevation: elevation, runAs: runAs)
             session.shells[ObjectIdentifier(channel)] = shell
             session.schedulePump(after: 0.005)
             return shell

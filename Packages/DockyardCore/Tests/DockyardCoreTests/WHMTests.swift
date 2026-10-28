@@ -151,9 +151,11 @@ let testToken = "WHMTOKEN0123456789ABCDEF"
     @Test func secondSyncIsIdempotent() async throws {
         let (source, repo, _, _, transport, svc, _) = try await setup()
         try transport.enqueue(200, fixture: "whm-listaccts.json")
-        try transport.enqueue(200, fixture: "whm-listaccts.json")
+        try transport.enqueue(200, fixture: "whm-get-domain-info.json")
         try await svc.sync(source)
         let before = try await repo.fetch()
+        try transport.enqueue(200, fixture: "whm-listaccts.json")
+        try transport.enqueue(200, fixture: "whm-get-domain-info.json")
         let report = try await svc.sync(source)
         #expect(report.created == 0 && report.updated == 0 && report.unchanged == 3 && report.removed == 0)
         #expect(try await repo.fetch() == before)
@@ -183,7 +185,8 @@ let testToken = "WHMTOKEN0123456789ABCDEF"
         let after2 = try #require(try await repo.connection(id: other.id))
         #expect(after2.name == "newsite-renamed.example")  // name was not edited, so it follows WHM
         #expect(after2.notes == "only notes edited")
-        #expect(report.updated == 1 && report.unchanged == 1)  // newsite followed WHM; acmeshop is all user-edited
+        #expect(after.faviconSite == "acme-new.example")  // the icon site was not edited, so it follows the domain
+        #expect(report.updated == 2 && report.unchanged == 0)
         #expect(report.removed == 1)  // bluebird is gone
     }
 
@@ -319,6 +322,167 @@ let testToken = "WHMTOKEN0123456789ABCDEF"
         let a = WHMSource(label: "a", host: "h")
         let (changed, _) = WHMMerge.merge(accounts: [WHMAccount(user: "svc", domain: "")], source: a, existing: [], now: t0)
         #expect(changed[0].name == "svc")
+    }
+
+    @Test func iconSiteFollowsTheDomainUntilEdited() {
+        let a = WHMSource(label: "a", host: "h")
+        let (created, _) = WHMMerge.merge(accounts: [WHMAccount(user: "acme", domain: "acme.com")], source: a, existing: [], now: t0)
+        #expect(created[0].faviconSite == "acme.com")
+
+        var older = created[0]
+        older.faviconSite = nil
+        let (filled, _) = WHMMerge.merge(accounts: [WHMAccount(user: "acme", domain: "acme.com")], source: a, existing: [older], now: t0)
+        #expect(filled.first?.faviconSite == "acme.com")
+
+        var edited = created[0]
+        edited.faviconSite = "brand.example"
+        edited.userEditedFields.insert(.faviconSite)
+        let (kept, _) = WHMMerge.merge(accounts: [WHMAccount(user: "acme", domain: "acme-new.com")], source: a, existing: [edited], now: t0)
+        #expect(kept.isEmpty || kept[0].faviconSite == "brand.example")
+    }
+
+    @Test func editingTheIconSiteMarksItEdited() async throws {
+        let db = try DockyardDatabase()
+        let repo = ConnectionRepository(database: db)
+        let a = WHMSource(label: "a", host: "h")
+        var c = WHMMerge.merge(accounts: [WHMAccount(user: "acme", domain: "acme.com")], source: a, existing: [], now: t0).changed[0]
+        try await repo.save(c)
+        c.faviconSite = "brand.example"
+        let saved = try await repo.saveEdited(c)
+        #expect(saved.userEditedFields.contains(.faviconSite))
+    }
+
+    @Test func parsesDomainInfo() throws {
+        let domains = try WHMClient.parseDomains(try Fixtures.data("whm-get-domain-info.json"))
+        #expect(domains.count == 5)
+        #expect(domains[0] == WHMDomain(user: "acmeshop", domain: "acme-shop.example", kind: .main, docroot: "/home/acmeshop/public_html"))
+    }
+
+    @Test func webURLsMainThenAddonThenSubSkippingParked() throws {
+        let domains = try WHMClient.parseDomains(try Fixtures.data("whm-get-domain-info.json"))
+        #expect(WHMMerge.webURLs(for: "acmeshop", in: domains) == [
+            WebURLMapping(path: "/home/acmeshop/public_html", baseURL: "https://acme-shop.example"),
+            WebURLMapping(path: "/home/acmeshop/acme-outlet.example", baseURL: "https://acme-outlet.example"),
+            WebURLMapping(path: "/home/acmeshop/public_html/blog", baseURL: "https://blog.acme-shop.example"),
+        ])
+        #expect(WHMMerge.webURLs(for: "newsite", in: domains) == [
+            WebURLMapping(path: "/home/newsite/public_html", baseURL: "https://newsite.example"),
+        ])
+    }
+
+    @Test func webURLsFollowDomainsUntilEdited() {
+        let a = WHMSource(label: "a", host: "h")
+        let domains = [WHMDomain(user: "acme", domain: "acme.com", kind: .main, docroot: "/home/acme/public_html")]
+        let acct = [WHMAccount(user: "acme", domain: "acme.com")]
+        let created = WHMMerge.merge(accounts: acct, domains: domains, source: a, existing: [], now: t0).changed[0]
+        #expect(created.webURLs == [WebURLMapping(path: "/home/acme/public_html", baseURL: "https://acme.com")])
+
+        // Domains unavailable (e.g. the token lacks the privilege): keep what is there.
+        let (unchanged, _) = WHMMerge.merge(accounts: acct, domains: nil, source: a, existing: [created], now: t0)
+        #expect(unchanged.isEmpty)
+
+        var edited = created
+        edited.webURLs = [WebURLMapping(path: "/home/acme/www", baseURL: "https://staging.acme.com")]
+        edited.userEditedFields.insert(.webURLs)
+        let (kept, _) = WHMMerge.merge(accounts: acct, domains: domains, source: a, existing: [edited], now: t0)
+        #expect(kept.isEmpty)
+    }
+
+    @Test func syncFillsWebURLsFromDomainInfo() async throws {
+        let (source, repo, _, _, transport, svc, _) = try await setup()
+        try transport.enqueue(200, fixture: "whm-listaccts.json")
+        try transport.enqueue(200, fixture: "whm-get-domain-info.json")
+        try await svc.sync(source)
+        let shop = try #require(try await repo.fetch(.search("acmeshop")).first)
+        #expect(shop.webURLs.first == WebURLMapping(path: "/home/acmeshop/public_html", baseURL: "https://acme-shop.example"))
+        #expect(transport.requests.last?.url?.path == "/json-api/get_domain_info")
+    }
+
+    @Test func newAccountsUseTheServersLogin() {
+        let a = WHMSource(label: "a", host: "h", accountLogin: .key(path: "~/.ssh/id_ed25519"))
+        let (changed, _) = WHMMerge.merge(accounts: [WHMAccount(user: "svc", domain: "")], source: a, existing: [], now: t0)
+        #expect(changed[0].authMethods == .key && changed[0].keyPath == "~/.ssh/id_ed25519")
+    }
+
+    @Test func syncNeverChangesAnExistingAccountsLogin() {
+        let a = WHMSource(label: "a", host: "h", accountLogin: .agent(.onePassword))
+        let existing = Connection(name: "svc", protocol: .sftp, host: "h", port: 22, username: "svc", source: .whm(a.id))
+        let (changed, report) = WHMMerge.merge(accounts: [WHMAccount(user: "svc", domain: "")], source: a, existing: [existing], now: t0)
+        #expect(changed.isEmpty && report.unchanged == 1)
+    }
+
+    @Test func changingTheLoginMovesOnlyAccountsStillOnTheOldOne() async throws {
+        let (source, repo, sources, _, transport, svc, _) = try await setup()
+        try transport.enqueue(200, fixture: "whm-listaccts.json")
+        try await svc.sync(source)
+        var hand = try #require(try await repo.fetch(.source(.whm(source.id))).first { $0.username == "bluebird" })
+        hand.authMethods = .agent
+        try await repo.saveEdited(hand)
+
+        var updated = source
+        updated.accountLogin = .key(path: "/keys/whm")
+        #expect(try await svc.save(updated) == 2)
+        #expect(try await sources.source(id: source.id)?.accountLogin == .key(path: "/keys/whm"))
+        let conns = try await repo.fetch(.source(.whm(source.id)))
+        for c in conns where c.username != "bluebird" { #expect(c.authMethods == .key && c.keyPath == "/keys/whm") }
+        #expect(conns.first { $0.username == "bluebird" }?.authMethods == .agent)
+
+        updated.accountLogin = .password
+        #expect(try await svc.save(updated) == 2)
+        for c in try await repo.fetch(.source(.whm(source.id))) where c.username != "bluebird" {
+            #expect(c.authMethods == .password && c.keyPath == nil)
+        }
+    }
+
+    @Test func throughRootLogsInAsRootAndWorksAsTheAccount() async throws {
+        let (source, repo, _, _, transport, svc, _) = try await setup()
+        var updated = source
+        updated.accountLogin = .throughRoot(.key(path: "/keys/root"))
+        try await svc.save(updated)
+        try transport.enqueue(200, fixture: "whm-listaccts.json")
+        try await svc.sync(updated)
+        let shop = try #require(try await repo.fetch(.source(.whm(source.id))).first { $0.username == "acmeshop" })
+        #expect(shop.loginUser == "root" && shop.authMethods == .key && shop.keyPath == "/keys/root")
+        #expect(shop.config.username == "root" && shop.config.runAs == "acmeshop")
+
+        updated.accountLogin = .password
+        try await svc.save(updated)
+        let back = try #require(try await repo.connection(id: shop.id))
+        #expect(back.loginUser == nil && back.config.username == "acmeshop" && back.config.runAs == nil)
+    }
+
+    @Test func accountLoginRoundTrips() {
+        for login: WHMAccountLogin in [
+            .password, .key(path: "/a b/k"), .agent(.system), .agent(.custom("/tmp/s.sock")),
+            .throughRoot(.key(path: "~/.ssh/id_ed25519")), .throughRoot(.agent(.onePassword)),
+        ] {
+            #expect(WHMAccountLogin(rawValue: login.rawValue) == login)
+        }
+        #expect(WHMAccountLogin(rawValue: "key:") == nil && WHMAccountLogin(rawValue: "bogus") == nil)
+        #expect(WHMAccountLogin(rawValue: "root:password") == nil && WHMAccountLogin(rawValue: "root:root:key:/k") == nil)
+    }
+
+    @Test func accountsShareTheServersKeyPassphrase() async throws {
+        let (source, repo, sources, secrets, transport, svc, _) = try await setup()
+        var updated = source
+        updated.accountLogin = .key(path: "/keys/whm")
+        try await svc.save(updated)
+        try transport.enqueue(200, fixture: "whm-listaccts.json")
+        try await svc.sync(updated)
+        try await secrets.setSecret("shared", for: source.id, purpose: .keyPassphrase)
+        let store = WHMPassphraseStore(base: secrets, connections: repo, sources: sources)
+        let conns = try await repo.fetch(.source(.whm(source.id)))
+        let shop = try #require(conns.first { $0.username == "acmeshop" })
+        #expect(try await store.secret(for: shop.id, purpose: .keyPassphrase) == "shared")
+        #expect(try await store.secret(for: shop.id, purpose: .password) == nil)
+
+        try await secrets.setSecret("own", for: shop.id, purpose: .keyPassphrase)
+        #expect(try await store.secret(for: shop.id, purpose: .keyPassphrase) == "own")
+
+        var other = try #require(conns.first { $0.username == "bluebird" })
+        other.keyPath = "/keys/mine"
+        try await repo.saveEdited(other)
+        #expect(try await store.secret(for: other.id, purpose: .keyPassphrase) == nil)
     }
 }
 

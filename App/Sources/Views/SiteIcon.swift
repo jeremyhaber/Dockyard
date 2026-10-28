@@ -211,9 +211,17 @@ struct SiteIcon: View {
     }
 
     static func initials(_ name: String) -> String {
-        let words = name.split { !$0.isLetter && !$0.isNumber }
-        let letters = words.prefix(2).compactMap(\.first).map { String($0).uppercased() }
+        let letters = words(name).prefix(2).compactMap(\.first).map { String($0).uppercased() }
         return letters.isEmpty ? "?" : letters.joined()
+    }
+
+    /// A domain such as `acme.com` or `blog.acme.co.uk` reads as its name without the TLD.
+    private static func words(_ name: String) -> [Substring] {
+        var labels = name.split(separator: ".")
+        guard !name.contains(" "), labels.count > 1 else { return name.split { !$0.isLetter && !$0.isNumber } }
+        labels.removeLast()
+        if labels.count > 1, ["co", "com", "net", "org", "gov", "edu", "ac"].contains(labels.last!) { labels.removeLast() }
+        return labels.flatMap { $0.split { !$0.isLetter && !$0.isNumber } }
     }
 
     /// Stable per name (not `hashValue`, which changes between launches).

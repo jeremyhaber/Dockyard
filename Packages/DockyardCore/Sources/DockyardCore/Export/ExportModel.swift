@@ -75,6 +75,8 @@ struct ExportPayload: Codable {
 
     struct WHMSourceDTO: Codable {
         var id: UUID, label: String, host: String, apiPort: Int, apiUser: String, apiTokenKeychainRef: String
+        /// Missing in exports made before per-server account login existed.
+        var accountLogin: String?
     }
 
     struct ConnectionDTO: Codable {
@@ -115,6 +117,7 @@ struct ExportPayload: Codable {
         var faviconSite: String?
         /// Optional so exports from before the tree-root setting still decode.
         var treeRoot: FolderTreeRoot?
+        var loginUser: String?
 
         init(_ c: Connection) {
             id = c.id; name = c.name; clientFolderId = c.clientFolderId; `protocol` = c.protocol.rawValue
@@ -127,11 +130,11 @@ struct ExportPayload: Codable {
             trashOnDelete = c.trashOnDelete; keepVersionsOnOverwrite = c.keepVersionsOnOverwrite; readOnly = c.readOnly
             verifyChecksums = c.verifyChecksums; jumpHost = c.jumpHost; pinnedFolders = c.pinnedFolders
             transferFilters = c.transferFilters; webURLs = c.webURLs; icon = c.icon; color = c.color; faviconSite = c.faviconSite
-            treeRoot = c.treeRoot
+            treeRoot = c.treeRoot; loginUser = c.loginUser
         }
 
         var connection: Connection {
-            Connection(
+            var c = Connection(
                 id: id, name: name, clientFolderId: clientFolderId, protocol: ConnectionProtocol(rawValue: `protocol`) ?? .sftp,
                 host: host, port: port, username: username, authMethods: AuthMethods(rawValue: authMethods), keyPath: keyPath,
                 elevation: Elevation(rawValue: elevation) ?? .none, elevateFileBrowsing: elevateFileBrowsing,
@@ -142,6 +145,8 @@ struct ExportPayload: Codable {
                 keepVersionsOnOverwrite: keepVersionsOnOverwrite, readOnly: readOnly, verifyChecksums: verifyChecksums,
                 jumpHost: jumpHost, pinnedFolders: pinnedFolders, transferFilters: transferFilters,
                 webURLs: webURLs ?? [], icon: icon, color: color, faviconSite: faviconSite)
+            c.loginUser = loginUser
+            return c
         }
     }
 
@@ -151,7 +156,8 @@ struct ExportPayload: Codable {
         folders = contents.folders.map { FolderDTO(id: $0.id, name: $0.name) }
         connections = contents.connections.map(ConnectionDTO.init)
         whmSources = contents.whmSources.map {
-            WHMSourceDTO(id: $0.id, label: $0.label, host: $0.host, apiPort: $0.apiPort, apiUser: $0.apiUser, apiTokenKeychainRef: $0.apiTokenKeychainRef)
+            WHMSourceDTO(id: $0.id, label: $0.label, host: $0.host, apiPort: $0.apiPort, apiUser: $0.apiUser, apiTokenKeychainRef: $0.apiTokenKeychainRef,
+                         accountLogin: $0.accountLogin.rawValue)
         }
         settings = contents.settings
         secrets = Dictionary(uniqueKeysWithValues: contents.secrets.map { id, byPurpose in
@@ -171,7 +177,8 @@ struct ExportPayload: Codable {
             connections: connections.map(\.connection),
             folders: folders.map { ClientFolder(id: $0.id, name: $0.name) },
             whmSources: whmSources.map {
-                WHMSource(id: $0.id, label: $0.label, host: $0.host, apiPort: $0.apiPort, apiUser: $0.apiUser, apiTokenKeychainRef: $0.apiTokenKeychainRef)
+                WHMSource(id: $0.id, label: $0.label, host: $0.host, apiPort: $0.apiPort, apiUser: $0.apiUser, apiTokenKeychainRef: $0.apiTokenKeychainRef,
+                          accountLogin: $0.accountLogin.flatMap(WHMAccountLogin.init(rawValue:)) ?? .password)
             },
             settings: settings, secrets: secretMap, whmTokens: whmTokens, createdAt: createdAt)
     }

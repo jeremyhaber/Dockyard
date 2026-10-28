@@ -1,0 +1,8 @@
+{"data":{"domains":[
+  {"domain":"acme-shop.example","user":"acmeshop","domain_type":"main","docroot":"/home/acmeshop/public_html","parent_domain":"acme-shop.example"},
+  {"domain":"acme-shop.net","user":"acmeshop","domain_type":"parked","docroot":"/home/acmeshop/public_html","parent_domain":"acme-shop.example"},
+  {"domain":"blog.acme-shop.example","user":"acmeshop","domain_type":"sub","docroot":"/home/acmeshop/public_html/blog","parent_domain":"acme-shop.example"},
+  {"domain":"acme-outlet.example","user":"acmeshop","domain_type":"addon","docroot":"/home/acmeshop/acme-outlet.example","parent_domain":"acme-shop.example"},
+  {"domain":"newsite.example","user":"newsite","domain_type":"main","docroot":"/home/newsite/public_html/","parent_domain":"newsite.example"},
+  {"domain":"broken.example","user":"newsite","domain_type":"main","docroot":""}
+]},"metadata":{"result":1,"version":1,"command":"get_domain_info","reason":"OK"}}
