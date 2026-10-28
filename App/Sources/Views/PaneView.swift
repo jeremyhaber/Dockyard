@@ -82,54 +82,99 @@ struct FolderTabsBar: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            ScrollView(.horizontal) {
-                HStack(spacing: 2) {
-                    ForEach(Array(pane.state.tabs.enumerated()), id: \.element.id) { index, tab in
-                        tabButton(index: index, path: tab.path)
+            ScrollViewReader { proxy in
+                ScrollView(.horizontal) {
+                    HStack(spacing: 4) {
+                        ForEach(Array(pane.state.tabs.enumerated()), id: \.element.id) { index, tab in
+                            FolderTab(
+                                pane: pane, index: index, path: tab.path,
+                                active: index == pane.activeTabIndex,
+                                closable: pane.state.tabs.count > 1
+                            )
+                            .id(tab.id)
+                        }
                     }
+                    .padding(.horizontal, 6)
+                    .frame(maxHeight: .infinity)
                 }
-                .padding(.horizontal, 6)
+                .scrollIndicators(.never)
+                .onAppear { reveal(proxy) }
+                .onChange(of: pane.activeTabIndex) { reveal(proxy) }
+                .onChange(of: pane.state.tabs.count) { reveal(proxy) }
             }
-            .scrollIndicators(.hidden)
+            Divider().padding(.vertical, 6)
             Button {
                 pane.openTab()
             } label: {
                 Image(systemName: "plus")
+                    .font(.system(size: 11, weight: .medium))
+                    .frame(width: 22, height: 22)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.borderless)
             .help("New folder tab (\u{2318}T)")
             .accessibilityLabel("New folder tab")
-            .padding(.horizontal, 8)
+            .padding(.horizontal, 4)
         }
-        .frame(height: 26)
+        .frame(height: 30)
         .background(Palette.chrome)
     }
 
-    private func tabButton(index: Int, path: String) -> some View {
-        let active = index == pane.activeTabIndex
-        let title = path == "/" ? "/" : RemotePath.lastComponent(of: path)
-        return HStack(spacing: 4) {
-            Image(systemName: "folder")
+    private func reveal(_ proxy: ScrollViewProxy) {
+        guard pane.state.tabs.indices.contains(pane.activeTabIndex) else { return }
+        let id = pane.state.tabs[pane.activeTabIndex].id
+        withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(id) }
+    }
+}
+
+private struct FolderTab: View {
+    let pane: PaneModel
+    let index: Int
+    let path: String
+    let active: Bool
+    let closable: Bool
+    @State private var hovering = false
+
+    private var title: String { path == "/" ? "/" : RemotePath.lastComponent(of: path) }
+
+    /// Long names are cut in the middle: the scroll view gives tabs no width to truncate against.
+    private var shortTitle: String {
+        guard title.count > 24 else { return title }
+        return "\(title.prefix(11))\u{2026}\(title.suffix(11))"
+    }
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: active ? "folder.fill" : "folder")
                 .font(.system(size: 10))
-            Text(title)
-                .font(.system(size: 11, weight: active ? .semibold : .regular))
+                .foregroundStyle(active ? Color.accentColor : Palette.textSecondary)
+            Text(shortTitle)
+                .font(.system(size: 11, weight: active ? .medium : .regular))
+                .foregroundStyle(active ? Palette.textPrimary : Palette.textSecondary)
                 .lineLimit(1)
-            if pane.state.tabs.count > 1 {
+            if closable {
                 Button {
                     pane.closeTab(at: index)
                 } label: {
                     Image(systemName: "xmark")
-                        .font(.system(size: 8, weight: .bold))
+                        .font(.system(size: 7, weight: .bold))
+                        .foregroundStyle(Palette.textSecondary)
+                        .frame(width: 14, height: 14)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .opacity(active || hovering ? 1 : 0)
                 .accessibilityLabel("Close tab \(title)")
             }
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 3)
-        .background(active ? Palette.ground : Color.clear, in: RoundedRectangle(cornerRadius: 5))
-        .overlay(RoundedRectangle(cornerRadius: 5).stroke(active ? Palette.border : Color.clear))
+        .padding(.leading, 8)
+        .padding(.trailing, closable ? 4 : 8)
+        .frame(height: 22)
+        .background(background, in: RoundedRectangle(cornerRadius: 5))
+        .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(active ? Palette.border : Color.clear))
+        .shadow(color: .black.opacity(active ? 0.06 : 0), radius: 1, y: 0.5)
         .contentShape(Rectangle())
+        .onHover { hovering = $0 }
         .onTapGesture {
             if NSEvent.modifierFlags.contains(.command) { return }
             pane.activateTab(index)
@@ -137,6 +182,11 @@ struct FolderTabsBar: View {
         .help(path)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(active ? .isSelected : [])
+    }
+
+    private var background: Color {
+        if active { return Palette.ground }
+        return hovering ? Palette.textPrimary.opacity(0.06) : .clear
     }
 }
 
@@ -178,6 +228,12 @@ struct PathBar: View {
                     }
                 PinButton(pane: pane, session: session)
                 WebURLButton(pane: pane, session: session)
+                if app.canOpenCPanel(session.connection) {
+                    Button { app.openCPanel(for: session.connection) } label: {
+                        Label("cPanel", systemImage: "safari").labelStyle(.titleAndIcon).font(.caption)
+                    }
+                    .help("Open \(session.connection.username)'s cPanel in your browser, already signed in")
+                }
             }
             Button { showRecent.toggle() } label: { Image(systemName: "arrow.uturn.backward.circle") }
                 .help("Recent changes and Undo")

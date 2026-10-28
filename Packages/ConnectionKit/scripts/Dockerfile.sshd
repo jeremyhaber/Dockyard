@@ -6,6 +6,7 @@ RUN apt-get update \
  && mkdir -p /run/sshd /etc/ssh/authorized_keys \
  && useradd -m -u 1000 -s /bin/bash dockyard \
  && echo 'dockyard:dockyard-test-pw' | chpasswd \
+ && useradd -m -u 1001 -s /usr/sbin/nologin cpuser \
  && echo 'root:root-test-pw' | chpasswd \
  && echo 'dockyard ALL=(ALL) ALL' > /etc/sudoers.d/dockyard \
  && chmod 440 /etc/sudoers.d/dockyard \

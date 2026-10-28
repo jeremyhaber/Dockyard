@@ -39,6 +39,8 @@ final class FavoriteCellView: NSTableCellView {
 final class TwoLineCellView: NSTableCellView {
     let title = NSTextField(labelWithString: "")
     let subtitle = NSTextField(labelWithString: "")
+    /// The site's icon; SwiftUI so it loads in the background and updates when the favicon arrives.
+    let icon = NSHostingView<SiteIcon?>(rootView: nil)
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -54,9 +56,15 @@ final class TwoLineCellView: NSTableCellView {
         stack.alignment = .leading
         stack.spacing = 0
         stack.translatesAutoresizingMaskIntoConstraints = false
+        icon.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(icon)
         addSubview(stack)
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
+            icon.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
+            icon.centerYAnchor.constraint(equalTo: centerYAnchor),
+            icon.widthAnchor.constraint(equalToConstant: 20),
+            icon.heightAnchor.constraint(equalToConstant: 20),
+            stack.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 8),
             stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
             stack.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
@@ -132,7 +140,7 @@ final class ManagerTableCoordinator: NSObject, NSTableViewDataSource, NSTableVie
             table.addTableColumn(c)
         }
         column("star", "\u{2605}", width: 28)
-        column("name", "Name", width: 160)
+        column("name", "Name", width: 190)
         column("host", "Host", width: 122)
         column("protocol", "Protocol", width: 56)
         column("source", "Source", width: 108)
@@ -220,6 +228,7 @@ final class ManagerTableCoordinator: NSObject, NSTableViewDataSource, NSTableVie
             if c.isProd { title += "  PROD" }
             if c.protocol == .rclone { title += "  CLOUD" }
             cell.title.stringValue = title
+            cell.icon.rootView = SiteIcon(connection: c, size: 20)
             var sub: [String] = []
             if let folder = c.clientFolderId, let name = parent.clientNames[folder] { sub.append(name) }
             if !c.username.isEmpty { sub.append(c.username) }

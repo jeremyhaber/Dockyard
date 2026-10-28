@@ -1,0 +1,304 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+:root{--sep:#e2e2e2;--muted:#8a8a8e;--text:#1d1d1f;--blue:#1d6fe0;--red:#ff3b30}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:1120px;height:700px;overflow:hidden;background:#fff;font:13px/1.2 -apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",sans-serif;color:var(--text);-webkit-font-smoothing:antialiased}
+#app{position:absolute;inset:0;display:flex;flex-direction:column}
+.mono{font-family:"SF Mono",Menlo,monospace;font-size:11px;color:#555}
+/* title bar */
+.title{height:46px;display:flex;align-items:center;padding:0 14px;background:#fbfbfb;flex:none}
+.lights{display:flex;gap:8px;margin-right:34px}.lights i{width:12px;height:12px;border-radius:50%;display:block}
+.tt b{display:block;font-size:13.5px;font-weight:600;color:#333}.tt span{font-size:11.5px;color:var(--muted)}
+.jump{margin-left:auto;width:230px;height:28px;border-radius:8px;background:#f0f0f0;display:flex;align-items:center;gap:7px;padding:0 10px;color:var(--muted);font-size:13px}
+.ticons{display:flex;gap:16px;margin-left:16px;color:#777;font-size:17px}
+/* connection tabs */
+.tabbar{height:30px;display:flex;align-items:center;gap:4px;padding:0 8px;background:#f1f1f1;border-top:1px solid var(--sep);border-bottom:1px solid var(--sep);flex:none}
+.ctab{height:24px;display:flex;align-items:center;gap:6px;padding:0 9px;border-radius:6px;font-size:12.5px;color:#333;white-space:nowrap}
+.ctab.on{background:#fff;font-weight:600;box-shadow:0 0 0 .5px #d6d6d6}
+.ctab.drag{opacity:.35}
+.ctab.drop{background:rgba(255,59,48,.22)}
+.ctab .x{color:#888;font-size:12px;font-weight:400}
+.dot{width:8px;height:8px;border-radius:50%;background:#34c759;flex:none}
+.badge{font-size:9.5px;font-weight:700;letter-spacing:.3px;padding:2px 5px;border-radius:4px}
+.prod{background:#fde6cc;color:#b45f06}.cloud{background:#e6defa;color:#5a3cc2}
+.group{display:flex;gap:2px;padding:2px;border-radius:8px;border:2px solid var(--red);background:rgba(255,59,48,.10)}
+.plus{margin-left:auto;color:#888;font-size:18px;padding-right:4px}
+/* quick connect */
+.qc{height:36px;display:flex;align-items:center;gap:8px;padding:0 12px;border-bottom:1px solid var(--sep);flex:none;font-size:12.5px}
+.qc b{font-weight:600;color:#444;margin-right:4px}
+.fld{height:24px;border:1px solid #dcdcdc;border-radius:6px;display:flex;align-items:center;padding:0 8px;color:#a5a5a5}
+/* body */
+.body{flex:1;display:flex;min-height:0}
+.side{width:184px;background:#f6f6f6;border-right:1px solid var(--sep);padding:10px 8px;flex:none;position:relative}
+.side h6{font-size:10.5px;font-weight:600;color:#888;letter-spacing:.4px;margin:4px 4px 6px}
+.si{display:flex;align-items:center;gap:7px;height:24px;padding:0 5px;border-radius:6px;font-size:12.5px;white-space:nowrap;overflow:hidden}
+.si.on{background:#e3e3e6}
+.av{width:16px;height:16px;border-radius:4px;color:#fff;font-size:7.5px;font-weight:700;display:flex;align-items:center;justify-content:center;flex:none}
+.si .badge{margin-left:auto}
+.sgap{height:12px}
+.sfoot{position:absolute;left:0;right:0;bottom:0;border-top:1px solid var(--sep);padding:8px 12px;font-size:12.5px;display:flex;gap:8px;align-items:center}
+.sfoot .n{margin-left:auto;background:#e4e4e4;border-radius:8px;padding:1px 7px;font-size:11px;font-weight:600}
+.main{flex:1;display:flex;min-width:0}
+.pane{display:flex;flex-direction:column;min-width:0;position:relative;border-right:1px solid var(--sep)}
+.pane:last-child{border-right:0}
+.colhead{height:28px;display:flex;align-items:center;gap:7px;padding:0 10px;border-bottom:1px solid var(--sep);font-weight:600;font-size:12.5px;background:#fafafa;flex:none}
+.colhead.on{background:#e4eefc}
+.colhead .x{margin-left:auto;color:#777;font-weight:400}
+.crumb{height:30px;display:flex;align-items:center;gap:5px;padding:0 10px;border-bottom:1px solid var(--sep);font-size:12.5px;color:#333;white-space:nowrap;overflow:hidden;flex:none}
+.crumb .nav{color:#aaa;letter-spacing:6px;margin-right:2px}
+.crumb i{color:#aaa;font-style:normal}
+.ftabs{height:30px;display:flex;align-items:center;gap:3px;padding:0 6px;overflow:hidden;border-bottom:1px solid var(--sep);flex:none;background:#fcfcfc;position:relative}
+.ft{height:22px;display:flex;align-items:center;gap:4px;padding:0 6px;border-radius:5px;font-size:11.5px;min-width:0;flex:0 1 auto;overflow:hidden;color:#444;white-space:nowrap}
+.ft.on{background:#fff;box-shadow:0 0 0 1px #d4d4d4;font-weight:600;color:#111}
+.ft.new{animation:none}
+.ft svg{flex:none}.ft .x{color:#999;font-size:11px;font-weight:400}
+.ftabs .plus{font-size:15px}
+.lh{height:24px;display:flex;align-items:center;padding:0 10px;border-bottom:1px solid var(--sep);font-size:11.5px;font-weight:600;color:#555;flex:none}
+.rows{flex:1;overflow:hidden;position:relative}
+.r{height:23px;display:flex;align-items:center;padding:0 10px;font-size:12.5px;white-space:nowrap}
+.r.sel{background:var(--blue);color:#fff}.r.sel .c,.r.sel .mono{color:#e6eeff}
+.r.flash{background:#dbe9ff}
+.r .nm{display:flex;align-items:center;gap:7px;flex:1;min-width:0;overflow:hidden}
+.c{color:#6b6b6b;text-align:right;font-size:12px}
+.w-size{width:58px}.w-mod{width:96px;text-align:left;padding-left:14px}.w-perm{width:82px;text-align:left;padding-left:10px}
+.foot{height:22px;border-top:1px solid var(--sep);display:flex;align-items:center;padding:0 10px;font-size:11px;color:#777;flex:none}
+.rail{width:26px;border-right:1px solid var(--sep);display:flex;flex-direction:column;align-items:center;gap:12px;padding-top:10px;color:#888;flex:none;background:#fafafa}
+.rail span{writing-mode:vertical-rl;transform:rotate(180deg);font-size:11px;color:#777}
+.droptarget{box-shadow:inset 0 0 0 2px var(--blue)}
+.hint{position:absolute;left:50%;transform:translateX(-50%);bottom:104px;background:var(--blue);color:#fff;font-weight:600;font-size:11.5px;padding:7px 13px;border-radius:16px;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+/* status bar */
+.status{height:28px;border-top:1px solid var(--sep);display:flex;align-items:center;gap:10px;padding:0 12px;font-size:12px;background:#fafafa;flex:none}
+.track{width:120px;height:5px;border-radius:3px;background:#e2e2e2;overflow:hidden}.track i{display:block;height:100%;background:var(--blue)}
+.sbtn{margin-left:auto;display:flex;gap:8px}.sbtn span{background:#ececec;border-radius:5px;padding:3px 10px;font-size:11.5px}
+/* overlays */
+#cursor{position:absolute;left:0;top:0;width:20px;height:28px;z-index:20;pointer-events:none}
+.ripple{position:absolute;width:30px;height:30px;margin:-15px 0 0 -15px;border-radius:50%;background:rgba(29,111,224,.28);z-index:19}
+.key{position:absolute;z-index:21;background:#2b2b2e;color:#fff;font-size:12px;font-weight:600;border-radius:5px;padding:3px 7px;box-shadow:0 1px 4px rgba(0,0,0,.25)}
+.ghost{position:absolute;z-index:18;opacity:.9;box-shadow:0 6px 18px rgba(0,0,0,.22)}
+.caption{position:absolute;left:50%;bottom:44px;transform:translateX(-50%);z-index:17;background:rgba(28,28,30,.86);color:#fff;font-size:15px;font-weight:600;padding:10px 18px;border-radius:12px;white-space:nowrap;box-shadow:0 4px 16px rgba(0,0,0,.2)}
+.caption kbd{font:inherit;background:rgba(255,255,255,.18);border-radius:5px;padding:1px 6px}
+</style></head>
+<body><div id="app"></div><div id="fx"></div><svg id="cursor" viewBox="0 0 20 28"><path d="M2 1 L2 21 L7 16.5 L10.5 24.5 L13.5 23.2 L10.2 15.4 L17 15.4 Z" fill="#000" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/></svg>
+<script>
+const ICON = {
+  folder: c => `<svg width="15" height="12" viewBox="0 0 15 12"><path d="M1 2.2C1 1.5 1.5 1 2.2 1h3.3l1.4 1.5h5.9c.7 0 1.2.5 1.2 1.2v6.1c0 .7-.5 1.2-1.2 1.2H2.2C1.5 11 1 10.5 1 9.8Z" fill="${c ? 'currentColor' : '#2f7bea'}" ${c ? '' : ''}/></svg>`,
+  ofolder: `<svg width="14" height="11" viewBox="0 0 15 12"><path d="M1 2.2C1 1.5 1.5 1 2.2 1h3.3l1.4 1.5h5.9c.7 0 1.2.5 1.2 1.2v6.1c0 .7-.5 1.2-1.2 1.2H2.2C1.5 11 1 10.5 1 9.8Z" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>`,
+  file: `<svg width="12" height="14" viewBox="0 0 12 14"><path d="M1.5 1h6l3 3v8.5c0 .3-.2.5-.5.5H1.5c-.3 0-.5-.2-.5-.5v-11c0-.3.2-.5.5-.5Z M7.5 1v3h3" fill="none" stroke="currentColor" stroke-width="1" opacity=".7"/></svg>`,
+  up: `<svg width="12" height="12" viewBox="0 0 12 12"><path d="M6 10V2M2.5 5.5 6 2l3.5 3.5" fill="none" stroke="#999" stroke-width="1.3"/></svg>`,
+  search: `<svg width="14" height="14" viewBox="0 0 14 14"><circle cx="6" cy="6" r="4.6" fill="none" stroke="#888" stroke-width="1.4"/><path d="M9.5 9.5 13 13" stroke="#888" stroke-width="1.5"/></svg>`,
+  mac: `<svg width="15" height="12" viewBox="0 0 15 12"><rect x="1" y="1" width="13" height="8" rx="1" fill="none" stroke="#888" stroke-width="1.2"/><path d="M5 11h5" stroke="#888" stroke-width="1.2"/></svg>`,
+};
+const F = (name, mod) => ({ name, dir: true, size: '', mod, perm: 'rwxr-xr-x' });
+const f = (name, size, mod, perm = 'rw-r--r--') => ({ name, size, mod, perm });
+const imgs = Array.from({ length: 16 }, (_, i) => f(`IMG_${4003 + 3 * i}.jpg`, `${184 + 7 * i} KB`, `Oct ${24 - (i >> 1)}, ${i % 2 ? '08' : '20'}:00`));
+const FS = {
+  'acme:public_html': { crumb: ['home', 'acme', 'public_html'], items: [F('wp-admin', 'Oct 2, 08:00'), F('wp-content', 'Oct 24, 08:00'), F('wp-includes', 'Oct 2, 08:00'), f('.htaccess', '1.2 KB', 'Oct 11, 08:00'), f('index.php', '405 B', 'Oct 22, 08:00'), f('robots.txt', '67 B', 'Sep 30, 08:00'), f('wp-config.php', '3.1 KB', 'Oct 11, 08:00', 'rw-------')] },
+  'acme:wp-content': { crumb: ['home', 'acme', 'public_html', 'wp-content'], items: [F('languages', 'Oct 3, 08:00'), F('plugins', 'Oct 21, 08:00'), F('themes', 'Oct 18, 08:00'), F('uploads', 'Oct 24, 08:00'), f('index.php', '28 B', 'Oct 2, 08:00')] },
+  'acme:uploads': { crumb: ['home', 'acme', 'public_html', 'wp-content', 'uploads'], items: imgs },
+  'bluebird:bluebird': { crumb: ['home', 'bluebird'], items: [F('backups', 'Oct 23, 08:00'), F('logs', 'Oct 25, 08:00'), F('public_html', 'Oct 25, 08:00'), f('.bashrc', '231 B', 'Dec 29, 2025')] },
+  'bluebird:public_html': { crumb: ['home', 'bluebird', 'public_html'], items: [F('css', 'Oct 12, 08:00'), F('images', 'Oct 20, 08:00'), f('index.html', '8.4 KB', 'Oct 25, 08:00'), f('menu.pdf', '2.4 MB', 'Oct 19, 08:00'), f('specials.html', '3.0 KB', 'Oct 24, 08:00')] },
+  'fjord:assets': { crumb: ['assets'], items: [F('brochures', 'Oct 14, 08:00'), F('video', 'Oct 9, 08:00'), f('hero.mp4', '48 MB', 'Oct 9, 08:00'), f('logo.svg', '6 KB', 'Aug 2, 08:00'), f('price-list.pdf', '1.1 MB', 'Oct 20, 08:00'), f('routes.json', '14 KB', 'Oct 26, 08:00')] },
+  'local:acme': { crumb: ['Users', 'demo', 'Sites', 'acme'], items: [F('wp-content', 'Oct 24, 08:00'), f('deploy-notes.md', '1.9 KB', 'Oct 24, 08:00'), f('hero-banner.jpg', '1.1 MB', 'Oct 25, 08:00'), f('index.php', '405 B', 'Oct 22, 08:00'), f('style-new.css', '18 KB', 'Oct 25, 08:00'), f('wp-config.php', '3.1 KB', 'Oct 11, 08:00')] },
+};
+const CONN = {
+  acme: { name: 'Acme Corp', badge: 'prod', host: 'FTP · ftp.acmecorp.example', av: ['AC', '#2f6fe0'] },
+  bluebird: { name: 'Bluebird Bakery', badge: 'prod', host: 'SFTP · bluebirdbakery.example', av: ['BB', '#5f7fa8'] },
+  fjord: { name: 'Fjord Marine (R2 assets)', short: 'Fjord Marine', badge: 'cloud', host: 'Cloudflare R2 · assets', av: ['FM', '#e07a2f'] },
+};
+const badge = b => b ? `<span class="badge ${b}">${b.toUpperCase()}</span>` : '';
+
+function initial() {
+  return {
+    tabs: ['acme'], active: 'acme', group: [],
+    ft: { acme: ['public_html'], bluebird: ['bluebird'], fjord: ['assets'] },
+    cur: { acme: 0, bluebird: 0, fjord: 0 },
+    sel: [], dragTab: null, dropTab: null, dragFiles: false, dropCol: null, transfer: null, added: [], flashUntil: 0,
+  };
+}
+const openFolder = (c, name) => s => { s.ft[c].push(name); s.cur[c] = s.ft[c].length - 1; s.active = c; };
+const pickTab = (c, i) => s => { s.cur[c] = i; s.active = c; };
+const openConn = c => s => { s.tabs.push(c); s.active = c; };
+
+// [time, mutation]
+const EVENTS = [
+  [1.8, openFolder('acme', 'wp-content')],
+  [3.4, openFolder('acme', 'uploads')],
+  [4.6, pickTab('acme', 0)],
+  [5.4, pickTab('acme', 2)],
+  [6.7, openConn('bluebird')],
+  [7.7, openConn('fjord')],
+  [9.4, s => { s.dragTab = 'bluebird'; }],
+  [10.2, s => { s.dropTab = 'acme'; }],
+  [10.7, s => { s.dragTab = s.dropTab = null; s.group = ['acme', 'bluebird']; s.active = 'bluebird'; }],
+  [11.8, s => { s.dragTab = 'fjord'; }],
+  [12.4, s => { s.dropTab = 'bluebird'; }],
+  [12.8, s => { s.dragTab = s.dropTab = null; s.group.push('fjord'); s.active = 'fjord'; }],
+  [14.4, openFolder('bluebird', 'public_html')],
+  [15.6, pickTab('acme', 1)],
+  [16.4, pickTab('acme', 2)],
+  [17.7, s => { s.sel = ['IMG_4003.jpg']; }],
+  [18.3, s => { s.sel = ['IMG_4003.jpg', 'IMG_4006.jpg']; }],
+  [18.7, s => { s.dragFiles = true; }],
+  [19.4, s => { s.dropCol = 'bluebird'; }],
+  [20.2, s => { s.dragFiles = false; s.dropCol = null; s.transfer = 20.2; s.active = 'bluebird'; }],
+  [21.5, s => { s.transfer = null; s.added = [f('IMG_4003.jpg', '184 KB', 'Oct 28, 09:41'), f('IMG_4006.jpg', '191 KB', 'Oct 28, 09:41')]; s.flashUntil = 22.6; }],
+];
+// cursor moves: [start, arrive, target key, x offset from the element's left (default: centre), y fraction]
+const MOVES = [
+  [0.5, 1.4, 'row-acme-wp-content', 62],
+  [2.1, 3.0, 'row-acme-uploads', 62],
+  [3.8, 4.4, 'ft-acme-0'],
+  [4.8, 5.3, 'ft-acme-2'],
+  [5.8, 6.5, 'side-bluebird', 60],
+  [7.0, 7.5, 'side-fjord', 60],
+  [8.2, 9.2, 'tab-bluebird'],
+  [9.5, 10.3, 'tab-acme'],
+  [11.0, 11.6, 'tab-fjord'],
+  [11.9, 12.5, 'tab-bluebird'],
+  [13.2, 14.1, 'row-bluebird-public_html', 62],
+  [14.9, 15.5, 'ft-acme-1'],
+  [15.8, 16.3, 'ft-acme-2'],
+  [16.8, 17.6, 'row-acme-IMG_4003.jpg', 70],
+  [17.8, 18.2, 'row-acme-IMG_4006.jpg', 70],
+  [18.8, 19.9, 'col-bluebird', null, 0.42],
+  [21.0, 22.0, 'col-fjord', null, 0.62],
+];
+const CLICKS = [1.8, 3.4, 4.6, 5.4, 6.7, 7.7, 9.4, 14.4, 15.6, 16.4, 17.7, 18.3, 18.7];
+const KEYS = [[1.45, 2.05, '⌘'], [3.05, 3.65, '⌘'], [14.15, 14.65, '⌘'], [18.0, 18.5, '⇧']];
+const CAPTIONS = [
+  [0.2, 5.65, 'Folder tabs: <kbd>⌘</kbd>-click a folder to open it in a new tab'],
+  [5.85, 8.6, 'Every connection opens in its own tab'],
+  [8.8, 13.05, 'Drop a tab on another to put them side by side'],
+  [13.25, 16.6, 'Each column keeps its own folder tabs'],
+  [16.8, 23.4, 'Drag files between columns to copy server to server'],
+];
+const DURATION = 24;
+
+function stateAt(t) { const s = initial(); for (const [et, fn] of EVENTS) if (et <= t) fn(s); return s; }
+
+function rows(conn, key, cols) {
+  const fsx = FS[key];
+  const items = conn === 'bluebird' && key === 'bluebird:public_html' ? [...fsx.items, ...S.added] : fsx.items;
+  const flash = S.t < S.flashUntil;
+  return items.map(it => {
+    const sel = conn === 'acme' && S.sel.includes(it.name);
+    const fl = flash && S.added.includes(it);
+    return `<div class="r${sel ? ' sel' : ''}${fl ? ' flash' : ''}" data-k="row-${conn}-${it.name}">
+      <span class="nm">${it.dir ? ICON.folder(sel) : ICON.file}${it.name}</span>
+      <span class="c w-size">${it.size}</span>${cols.mod ? `<span class="c w-mod">${it.mod}</span>` : ''}${cols.perm ? `<span class="mono w-perm">${it.dir ? 'rwxr-xr-x' : it.perm}</span>` : ''}</div>`;
+  }).join('');
+}
+function pane(conn, opts) {
+  const tabs = conn === 'local' ? ['acme', 'Downloads'] : S.ft[conn];
+  const cur = conn === 'local' ? 0 : S.cur[conn];
+  const key = conn === 'local' ? 'local:acme' : `${conn}:${tabs[cur]}`;
+  const fsx = FS[key];
+  const n = fsx.items.length + (key === 'bluebird:public_html' ? S.added.length : 0);
+  const dirs = fsx.items.filter(i => i.dir).length;
+  const cols = { mod: true, perm: opts.perm };
+  const c = CONN[conn];
+  return `<div class="pane${S.dropCol === conn ? ' droptarget' : ''}" data-k="col-${conn}" style="${opts.style || ''}">
+    ${opts.head ? `<div class="colhead${S.active === conn ? ' on' : ''}"><span class="dot"></span>${c.short || c.name} ${badge(c.badge)}<span class="x">✕</span></div>` : ''}
+    <div class="crumb"><span class="nav">‹›↑</span>${conn === 'local' ? '/' : ''} ${(opts.head && fsx.crumb.length > 3 ? ['…', ...fsx.crumb.slice(-2)] : fsx.crumb).map(p => `<i>›</i> ${p}`).join(' ').replace(/^<i>›<\/i> /, conn === 'local' ? '<i>›</i> ' : '/ <i>›</i> ')}</div>
+    <div class="ftabs">${tabs.map((name, i) => `<div class="ft${i === cur ? ' on' : ''}" data-k="ft-${conn}-${i}">${ICON.ofolder}${name}<span class="x">✕</span></div>`).join('')}<span class="plus">+</span></div>
+    <div class="lh"><span style="flex:1">Name</span><span class="w-size" style="text-align:left">Size</span><span class="w-mod">Modified</span>${opts.perm ? '<span class="w-perm">Perms</span>' : ''}</div>
+    <div class="rows"><div class="r"><span class="nm">${ICON.up}..</span></div>${rows(conn, key, cols)}</div>
+    ${S.dropCol === conn ? `<div class="hint">Drop to copy 2 files here · Acme Corp → ${c.name}</div>` : ''}
+    <div class="foot">${n - dirs} ${n - dirs === 1 ? 'file' : 'files'}, ${dirs} ${dirs === 1 ? 'folder' : 'folders'}</div>
+  </div>`;
+}
+function tab(id) {
+  const c = CONN[id];
+  return `<div class="ctab${S.active === id ? ' on' : ''}${S.dragTab === id ? ' drag' : ''}${S.dropTab === id ? ' drop' : ''}" data-k="tab-${id}"><span class="dot"></span>${c.name} ${badge(c.badge)}<span class="x">✕</span></div>`;
+}
+function draw() {
+  const c = CONN[S.active];
+  let tabbar = '';
+  for (let i = 0; i < S.tabs.length; i++) {
+    const id = S.tabs[i];
+    if (S.group.includes(id)) {
+      tabbar += `<div class="group">${S.group.map(tab).join('')}</div>`;
+      i += S.group.length - 1;
+    } else tabbar += tab(id);
+  }
+  const grouped = S.group.includes(S.active);
+  const main = grouped
+    ? `<div class="rail">›${ICON.mac}<span>This Mac</span></div>` + S.group.map(id => pane(id, { head: true, style: 'flex:1' })).join('')
+    : pane('local', { style: 'width:44%' }) + pane(S.active, { perm: true, style: 'flex:1' });
+  const sideItem = (id, sub) => { const k = CONN[id]; return `<div class="si${S.active === id ? ' on' : ''}" data-k="side-${id}${sub || ''}"><span class="av" style="background:${k.av[1]}">${k.av[0]}</span>${k.short || k.name}${badge(k.badge)}</div>`; };
+  const small = (ini, col, name) => `<div class="si"><span class="av" style="background:${col}">${ini}</span>${name}</div>`;
+  let status = '<span style="color:#777">⇅</span> <span style="color:#777">No transfers</span>';
+  if (S.transfer != null) {
+    const p = Math.min(1, (S.t - S.transfer) / 1.25);
+    status = `<span style="color:var(--blue)">⇅</span> <b style="font-weight:600">2 active</b><div class="track"><i style="width:${(p * 100).toFixed(1)}%"></i></div><span style="color:#666">IMG_${p < .5 ? 4003 : 4006}.jpg · Acme Corp → Bluebird Bakery</span>`;
+  } else if (S.added.length) status = '<span style="color:#34c759">✓</span> <span style="color:#555">2 files copied to Bluebird Bakery</span>';
+  document.getElementById('app').innerHTML = `
+  <div class="title"><div class="lights"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></div>
+    <div class="tt"><b>${c.name}</b><span>${c.host}</span></div>
+    <div class="jump">${ICON.search}Jump to site or folder <span style="margin-left:auto;font-size:11px">⌘K</span></div>
+    <div class="ticons">⟳ ⏏ ◷</div></div>
+  <div class="tabbar">${tabbar}<span class="plus">+</span></div>
+  <div class="qc"><b>Quick Connect</b><div class="fld" style="color:#333;width:70px">SFTP ⌄</div><div class="fld" style="flex:1">Host or sftp://user@host</div><div class="fld" style="width:110px">User</div><div class="fld" style="width:110px">Password</div><div class="fld" style="width:46px">22</div></div>
+  <div class="body">
+    <div class="side"><h6>OPEN NOW</h6>${S.tabs.map(id => sideItem(id, '-open')).join('')}
+      <div class="sgap"></div><h6>FAVORITES</h6>${sideItem('bluebird')}${sideItem('fjord')}${small('DV', '#6d6d72', 'Dev VPS')}
+      <div class="sgap"></div><h6>RECENT</h6>${small('SA', '#d0742c', 'staging.acmecorp…')}${small('CE', '#d0742c', 'cedarpinelaw.example')}${small('GE', '#9b59b6', 'granitefitness.exa…')}${small('TE', '#d23b3b', 'test.example.org')}
+      <div class="sfoot">☰ Connections<span class="n">43</span></div></div>
+    <div class="main">${main}</div>
+  </div>
+  <div class="status">${status}<div class="sbtn"><span>Transfers</span><span>Log</span><span>Terminal</span></div></div>`;
+}
+
+// Cursor targets are measured from the layout at the moment the cursor arrives.
+let POINTS = null;
+function measure() {
+  POINTS = MOVES.map(([, arrive, k, ox, fy]) => {
+    S = stateAt(arrive - 0.001); S.t = arrive; draw();
+    const el = document.querySelector(`[data-k="${k}"]`);
+    const r = el.getBoundingClientRect();
+    return [ox != null ? r.left + ox : r.left + r.width / 2, r.top + r.height * (fy ?? 0.5)];
+  });
+}
+const ease = x => x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
+function cursorAt(t) {
+  let p = [760, 520];
+  for (let i = 0; i < MOVES.length; i++) {
+    const [s, e] = MOVES[i];
+    if (t < s) break;
+    const q = POINTS[i];
+    if (t >= e) { p = q; continue; }
+    const k = ease((t - s) / (e - s));
+    // a slight arc so moves don't look robotic
+    const lift = Math.sin(k * Math.PI) * Math.min(40, Math.hypot(q[0] - p[0], q[1] - p[1]) * 0.08);
+    return [p[0] + (q[0] - p[0]) * k, p[1] + (q[1] - p[1]) * k - lift];
+  }
+  return p;
+}
+let S;
+function render(t) {
+  if (!POINTS) measure();
+  S = stateAt(t); S.t = t; draw();
+  const [x, y] = cursorAt(t);
+  const cur = document.getElementById('cursor');
+  cur.style.transform = `translate(${x - 2}px,${y - 1}px)`;
+  let fx = '';
+  for (const ct of CLICKS) if (t >= ct && t < ct + 0.3) {
+    const k = (t - ct) / 0.3;
+    fx += `<div class="ripple" style="left:${x}px;top:${y}px;transform:scale(${0.5 + k});opacity:${1 - k}"></div>`;
+  }
+  for (const [a, b, label] of KEYS) if (t >= a && t < b) fx += `<div class="key" style="left:${x + 16}px;top:${y + 18}px">${label}</div>`;
+  if (S.dragTab) {
+    const k = CONN[S.dragTab];
+    fx += `<div class="ghost ctab on" style="left:${x - 24}px;top:${y + 14}px;opacity:.8;background:#fff;border-radius:6px"><span class="dot"></span>${k.name} ${badge(k.badge)}</div>`;
+  }
+  if (S.dragFiles) fx += `<div class="ghost" style="left:${x + 4}px;top:${y + 6}px;background:#fff;border-radius:6px;padding:5px 9px;display:flex;gap:6px;align-items:center;font-size:12px">${ICON.file}IMG_4003.jpg <span style="background:var(--red);color:#fff;border-radius:9px;padding:0 6px;font-size:11px;font-weight:700">2</span></div>`;
+  for (const [a, b, text] of CAPTIONS) if (t >= a && t < b) {
+    const o = Math.min(1, (t - a) / 0.25, (b - t) / 0.25);
+    fx += `<div class="caption" style="opacity:${o};transform:translate(-50%,${(1 - o) * 6}px)">${text}</div>`;
+  }
+  document.getElementById('fx').innerHTML = fx;
+}
+window.render = render; window.DURATION = DURATION;
+if (!navigator.webdriver) { const t0 = performance.now(); const loop = () => { render(((performance.now() - t0) / 1000) % DURATION); requestAnimationFrame(loop); }; loop(); }
+</script></body></html>

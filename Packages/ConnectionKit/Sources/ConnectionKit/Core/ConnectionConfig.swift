@@ -39,6 +39,8 @@ public struct ConnectionConfig: Sendable, Hashable, Codable, Identifiable {
     public var elevation: Elevation
     /// The agent used by `.agent` authentication.
     public var agentSocket: AgentSocket
+    /// SFTP only: after logging in as `username` (root), files, commands and shells run as this user instead.
+    public var runAs: String?
 
     public init(
         id: UUID = UUID(),
@@ -49,7 +51,8 @@ public struct ConnectionConfig: Sendable, Hashable, Codable, Identifiable {
         authMethods: AuthMethods = .password,
         keyPath: String? = nil,
         elevation: Elevation = .none,
-        agentSocket: AgentSocket = .system
+        agentSocket: AgentSocket = .system,
+        runAs: String? = nil
     ) {
         self.id = id
         self.protocol = `protocol`
@@ -60,6 +63,7 @@ public struct ConnectionConfig: Sendable, Hashable, Codable, Identifiable {
         self.keyPath = keyPath
         self.elevation = elevation
         self.agentSocket = agentSocket
+        self.runAs = runAs
     }
 
     public init(from decoder: Decoder) throws {
@@ -73,7 +77,8 @@ public struct ConnectionConfig: Sendable, Hashable, Codable, Identifiable {
             authMethods: try c.decode(AuthMethods.self, forKey: .authMethods),
             keyPath: try c.decodeIfPresent(String.self, forKey: .keyPath),
             elevation: try c.decode(Elevation.self, forKey: .elevation),
-            agentSocket: try c.decodeIfPresent(AgentSocket.self, forKey: .agentSocket) ?? .system
+            agentSocket: try c.decodeIfPresent(AgentSocket.self, forKey: .agentSocket) ?? .system,
+            runAs: try c.decodeIfPresent(String.self, forKey: .runAs)
         )
     }
 }

@@ -94,6 +94,11 @@ struct SiteEditorSheet: View {
 
     private var authSection: some View {
         Section("Authentication") {
+            if let login = draft.original?.loginUser {
+                Text("Logs in as \(login), then works as \(draft.username). The key or agent below is \(login)'s. Set by the WHM server's account login.")
+                    .font(.caption).foregroundStyle(Palette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             Toggle("SSH agent", isOn: $draft.useAgent)
             if draft.useAgent { AgentSocketPicker(draft: $draft) }
             Toggle("SSH key", isOn: $draft.useKey)
@@ -102,6 +107,7 @@ struct SiteEditorSheet: View {
                     TextField("Key file", text: $draft.keyPath, prompt: Text("~/.ssh/id_ed25519"))
                     Button("Choose\u{2026}") { chooseKey() }
                 }
+                PublicKeyWarning(path: draft.keyPath)
                 SecretSourceField(draft: $draft, purpose: .keyPassphrase, title: "Key passphrase", keychainPrompt: "Only if the key is encrypted")
             }
             Toggle(draft.useKey ? "Password too" : "Password", isOn: $draft.usePassword)
@@ -257,8 +263,7 @@ struct SiteEditorSheet: View {
     }
 
     private func chooseKey() {
-        let ssh = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".ssh")
-        if let url = Dialogs.chooseFile(directory: ssh) { draft.keyPath = url.path }
+        if let path = Dialogs.choosePrivateKey() { draft.keyPath = path }
     }
 
     private func chooseLocalFolder() {

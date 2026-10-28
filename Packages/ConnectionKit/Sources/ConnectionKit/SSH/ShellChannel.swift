@@ -12,11 +12,15 @@ public final class ShellChannel: @unchecked Sendable {
     private var isFinished = false
 
     // Created on the session queue by `SSHSession.openShell`.
-    init(session: SSHSession, channel: SSHChannel, elevation: ShellElevation?) {
+    init(session: SSHSession, channel: SSHChannel, elevation: ShellElevation?, runAs: String? = nil) {
         (output, continuation) = AsyncStream<Data>.makeStream(bufferingPolicy: .unbounded)
         self.session = session
         self.channel = channel
-        if let elevation, elevation.kind != .none {
+        if let runAs {
+            // Logged in as root: root's su needs no password.
+            try? channel.write(Array("exec su -s /bin/bash - \(runAs)\n".utf8))
+            session.log(.status, "Switching the shell to \(runAs)")
+        } else if let elevation, elevation.kind != .none {
             let command = elevation.kind == .su ? "su -" : "sudo -i"
             if let password = elevation.password, !password.isEmpty {
                 assistant = ElevationAssistant(command: command, password: password)

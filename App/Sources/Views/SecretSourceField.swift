@@ -167,7 +167,7 @@ struct OnePasswordPickerSheet: View {
     private var columns: some View {
         HStack(spacing: 0) {
             column("Vault") {
-                List(vaults, selection: $vault) { Label($0.name, systemImage: "lock.rectangle.stack") }
+                List(vaults, selection: $vault) { Label($0.displayName, systemImage: "lock.rectangle.stack") }
             }
             Divider()
             column("Item") {

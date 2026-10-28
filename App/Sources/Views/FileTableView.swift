@@ -341,7 +341,7 @@ final class FileTableCoordinator: NSObject, NSTableViewDataSource, NSTableViewDe
 
     private func openFile(_ item: RemoteItem) {
         if pane.side == .local {
-            NSWorkspace.shared.open(URL(fileURLWithPath: item.path))
+            EditCenter.openInEditor(URL(fileURLWithPath: item.path))
             return
         }
         app.edits.edit(item, in: session)
@@ -427,7 +427,9 @@ final class FileTableCoordinator: NSObject, NSTableViewDataSource, NSTableViewDe
             menu.addItem(item)
         }
 
-        add("Open", #selector(menuOpen), enabled: !selection.isEmpty)
+        var editsFile = false
+        if case .item(let item) = selection.first { editsFile = !item.isDirectory }
+        add(editsFile ? "Edit" : "Open", #selector(menuOpen), enabled: !selection.isEmpty)
         add("Quick Look", #selector(menuQuickLook), enabled: items.contains { !$0.isDirectory })
         if items.count == 1, items[0].isDirectory { add("Open in New Tab", #selector(menuOpenInTab)) }
         menu.addItem(.separator())

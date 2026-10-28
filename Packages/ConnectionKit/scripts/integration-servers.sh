@@ -13,6 +13,7 @@ SSH_PORT=2222        # publickey or password
 SSH_BOTH_PORT=2223   # AuthenticationMethods publickey,password
 SSH_KBD_PORT=2224    # keyboard-interactive only
 SSH_SLOW_PORT=2225   # proxy to 2222 adding 40 ms round trip (scripts/latency-proxy.py)
+SSH_ROOT_PORT=2226   # root by key only; account cpuser has no shell (WHM "through root" login)
 FTP_PORT=2121        # pure-ftpd: MLSD, explicit TLS, EPSV
 FTP_LIST_PORT=2122   # vsftpd: no MLSD, exercises the LIST fallback
 FTP_LIMITED_PORT=2123 # pure-ftpd allowing 2 connections per client: exercises the queue's back-off
@@ -64,7 +65,7 @@ up() {
   pubkeys="$(cat "$KEY_DIR"/*.pub)"
   docker run -d --name dockyard-test-sftp -e PUBLIC_KEY="$pubkeys" \
     -p "127.0.0.1:$SSH_PORT:2222" -p "127.0.0.1:$SSH_BOTH_PORT:2223" -p "127.0.0.1:$SSH_KBD_PORT:2224" \
-    "$SSH_IMAGE" >/dev/null
+    -p "127.0.0.1:$SSH_ROOT_PORT:2226" "$SSH_IMAGE" >/dev/null
 
   docker network create --internal "$NET_INNER" >/dev/null
   docker network create --internal "$NET_DEEP" >/dev/null

@@ -42,8 +42,13 @@ public enum OnePasswordStatus: Sendable, Equatable {
 public struct OnePasswordVault: Sendable, Hashable, Codable, Identifiable {
     public var id: String
     public var name: String
+    /// The account's sign-in address, set only when vaults from several accounts are listed together.
+    public var account: String?
 
-    public init(id: String, name: String = "") { self.id = id; self.name = name }
+    public init(id: String, name: String = "", account: String? = nil) { self.id = id; self.name = name; self.account = account }
+
+    /// The name, plus the account when several accounts can have vaults with the same name.
+    public var displayName: String { account.map { "\(name) (\($0))" } ?? name }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)

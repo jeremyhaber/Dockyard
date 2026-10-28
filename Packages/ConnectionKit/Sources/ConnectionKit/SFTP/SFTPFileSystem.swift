@@ -21,6 +21,9 @@ public actor SFTPFileSystem: RemoteFileSystem, RemoteCommandRunner {
 
     private var ssh: SSHSession?
     private var sftp: SFTPClient?
+    /// Set by `connect()` and cleared by `disconnect()`: a dropped session is re-established on next use.
+    private var shouldReconnect = false
+    private var reconnecting: Task<Void, Error>?
     public private(set) var isBrowsingAsRoot = false
 
     public nonisolated var logStream: AsyncStream<LogLine> { hub.stream() }
@@ -41,6 +44,11 @@ public actor SFTPFileSystem: RemoteFileSystem, RemoteCommandRunner {
     // MARK: Connection
 
     public func connect() async throws {
+        try await establish()
+        shouldReconnect = true
+    }
+
+    private func establish() async throws {
         await disconnectQuietly()
         hub.emit(.status, "Connecting to \(config.host):\(config.port)...")
         do {
@@ -57,6 +65,7 @@ public actor SFTPFileSystem: RemoteFileSystem, RemoteCommandRunner {
     }
 
     public func disconnect() async {
+        shouldReconnect = false
         await disconnectQuietly()
         hub.emit(.status, "Disconnected")
     }
@@ -94,6 +103,11 @@ public actor SFTPFileSystem: RemoteFileSystem, RemoteCommandRunner {
     }
 
     private func openSFTP(on session: SSHSession) async throws {
+        if let user = config.runAs {
+            hub.emit(.status, "Logged in as \(config.username); starting sftp-server as \(user)")
+            sftp = try await session.openSFTP(asUser: user)
+            return
+        }
         if options.browseAsRoot, config.elevation != .none {
             let method = config.elevation == .su ? "su" : "sudo"
             do {
@@ -110,41 +124,77 @@ public actor SFTPFileSystem: RemoteFileSystem, RemoteCommandRunner {
         sftp = try await session.openSFTP()
     }
 
-    private func client() throws -> SFTPClient {
+    /// Returns the live SFTP client, reconnecting if the server dropped us.
+    private func client() async throws -> SFTPClient {
+        if let sftp, let ssh, await ssh.alive { return sftp }
+        guard shouldReconnect else { throw RemoteError.notConnected }
+        if let reconnecting {
+            try await reconnecting.value
+        } else {
+            hub.emit(.status, "Connection lost, reconnecting...")
+            let task = Task { try await self.establish() }
+            reconnecting = task
+            defer { reconnecting = nil }
+            try await task.value
+        }
         guard let sftp else { throw RemoteError.notConnected }
         return sftp
+    }
+
+    /// The live SSH session for shells and commands, reconnecting if needed.
+    private func liveSSH() async throws -> SSHSession {
+        _ = try await client()
+        let ssh = try await liveSSH()
+        return ssh
+    }
+
+    /// Runs a read that is safe to repeat, again on a fresh connection if it failed because the old one was dead.
+    private func retryingOnDrop<T>(_ body: (SFTPClient) async throws -> T) async throws -> T {
+        let sftp = try await client()
+        do {
+            return try await body(sftp)
+        } catch {
+            guard shouldReconnect, let ssh, !(await ssh.alive) else { throw error }
+            return try await body(try await client())
+        }
     }
 
     // MARK: Shell and exec on the same connection
 
     /// Opens a terminal on the existing SSH connection. Uses the configured elevation (`su -` / `sudo -i`).
     public func openShell(cols: Int, rows: Int) async throws -> ShellChannel {
-        guard let ssh else { throw RemoteError.notConnected }
+        let ssh = try await liveSSH()
         var elevation: ShellElevation?
-        if config.elevation != .none {
+        if config.elevation != .none, config.runAs == nil {
             elevation = ShellElevation(kind: config.elevation, password: try await secrets.secret(for: config.id, purpose: .elevationPassword))
         }
         hub.emit(.status, "Opening shell (\(cols)x\(rows))")
-        return try await ssh.openShell(cols: cols, rows: rows, elevation: elevation)
+        return try await ssh.openShell(cols: cols, rows: rows, elevation: elevation, runAs: config.runAs)
     }
 
     public func exec(_ command: String) async throws -> SSHExecResult {
-        guard let ssh else { throw RemoteError.notConnected }
+        let ssh = try await liveSSH()
         hub.emit(.command, command)
-        return try await ssh.exec(command)
+        return try await ssh.exec(try asAccount(command))
+    }
+
+    /// `command` as the `runAs` user when the login is root on that user's behalf.
+    private func asAccount(_ command: String) throws -> String {
+        guard let user = config.runAs else { return command }
+        return try SSHSession.asUser(user, command)
     }
 
     /// Runs a command and streams its output and exit status. With `elevated` and an `su`/`sudo` setting it
     /// runs as root (`canElevateCommands` says whether the file browser is root too). Cancelling the
     /// consuming task (or dropping the stream) kills the remote process group.
     public func execStream(_ command: String, elevated: Bool) async throws -> AsyncThrowingStream<SSHExecEvent, Error> {
-        guard let ssh else { throw RemoteError.notConnected }
+        let ssh = try await liveSSH()
         var elevation: ShellElevation?
-        if elevated, config.elevation != .none {
+        if elevated, config.elevation != .none, config.runAs == nil {
             elevation = ShellElevation(kind: config.elevation, password: try await secrets.secret(for: config.id, purpose: .elevationPassword))
         }
         hub.emit(.command, elevation == nil ? command : "[\(config.elevation == .su ? "su" : "sudo")] \(command)")
-        return ssh.execStream(command, elevation: elevation)
+        return ssh.execStream(elevation == nil ? try asAccount(command) : command, elevation: elevation)
     }
 
     public var canElevateCommands: Bool { isBrowsingAsRoot }
@@ -152,16 +202,15 @@ public actor SFTPFileSystem: RemoteFileSystem, RemoteCommandRunner {
     // MARK: Listing
 
     public func homeDirectory() async throws -> String {
-        let sftp = try client()
-        do { return try await sftp.run { try $0.realpath(".") } } catch { throw map(error, path: ".") }
+        do { return try await retryingOnDrop { try await $0.run { try $0.realpath(".") } } } catch { throw map(error, path: ".") }
     }
 
     public func list(_ path: String) async throws -> [RemoteItem] {
-        let sftp = try client()
         let dir = path.isEmpty ? "." : path
         hub.emit(.status, "Listing directory \(dir)")
         let entries: [SFTPEntry]
-        do { entries = try await sftp.run { try $0.listDirectory(dir) } } catch { throw map(error, path: dir) }
+        do { entries = try await retryingOnDrop { try await $0.run { try $0.listDirectory(dir) } } } catch { throw map(error, path: dir) }
+        let sftp = try await client()
 
         var items: [RemoteItem] = []
         items.reserveCapacity(entries.count)
@@ -182,9 +231,9 @@ public actor SFTPFileSystem: RemoteFileSystem, RemoteCommandRunner {
     }
 
     public func stat(_ path: String) async throws -> RemoteItem? {
-        let sftp = try client()
         do {
-            let attributes = try await sftp.run { try $0.stat(path, followLinks: false) }
+            let attributes = try await retryingOnDrop { try await $0.run { try $0.stat(path, followLinks: false) } }
+            let sftp = try await client()
             var item = Self.item(name: RemotePath.lastComponent(of: path), path: path, attributes: attributes)
             if attributes.isSymlink {
                 let resolved = try? await sftp.run { client -> (String, SFTPAttributes?) in
@@ -215,7 +264,7 @@ public actor SFTPFileSystem: RemoteFileSystem, RemoteCommandRunner {
     // MARK: Transfers
 
     public func download(_ remote: String, to local: URL, progress: Progress, resume: Bool) async throws {
-        let sftp = try client()
+        let sftp = try await client()
         let hub = self.hub
         do {
             let bytes = try await SFTPTransfer.download(sftp, remote: remote, to: local, resume: resume, progress: progress) { offset in
@@ -229,7 +278,7 @@ public actor SFTPFileSystem: RemoteFileSystem, RemoteCommandRunner {
     }
 
     public func upload(_ local: URL, to remote: String, progress: Progress, resume: Bool) async throws {
-        let sftp = try client()
+        let sftp = try await client()
         let hub = self.hub
         guard let total = LocalFile.size(of: local) else { throw RemoteError.notFound(local.path) }
         do {
@@ -256,19 +305,19 @@ public actor SFTPFileSystem: RemoteFileSystem, RemoteCommandRunner {
     // MARK: Namespace operations
 
     public func mkdir(_ path: String) async throws {
-        let sftp = try client()
+        let sftp = try await client()
         hub.emit(.status, "mkdir \(path)")
         do { try await sftp.run { try $0.mkdir(path) } } catch { throw map(error, path: path) }
     }
 
     public func rename(_ from: String, _ to: String) async throws {
-        let sftp = try client()
+        let sftp = try await client()
         hub.emit(.status, "rename \(from) -> \(to)")
         do { try await sftp.run { try $0.rename(from, to) } } catch { throw map(error, path: from) }
     }
 
     public func delete(_ path: String, recursive: Bool) async throws {
-        let sftp = try client()
+        let sftp = try await client()
         hub.emit(.status, "rm\(recursive ? " -r" : "") \(path)")
         do { try await remove(path, recursive: recursive, on: sftp) } catch { throw map(error, path: path) }
     }
@@ -289,7 +338,7 @@ public actor SFTPFileSystem: RemoteFileSystem, RemoteCommandRunner {
     }
 
     public func chmod(_ path: String, mode: UInt16) async throws {
-        let sftp = try client()
+        let sftp = try await client()
         hub.emit(.status, "chmod \(String(mode & 0o7777, radix: 8)) \(path)")
         let attributes = SFTPAttributes(permissions: UInt32(mode & 0o7777))
         do { try await sftp.run { try $0.setstat(path, attributes) } } catch { throw map(error, path: path) }

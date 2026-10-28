@@ -218,6 +218,36 @@ private func elevatedStore(_ config: ConnectionConfig, elevationPassword: String
         #expect(!lines.contains { $0.contains(password) })
     }
 
+    @Test func throughRootWorksAsTheAccount() async throws {
+        var config = sftpConfig(auth: .key, key: Env.key("id_ed25519"), port: Env.rootPort)
+        config.username = "root"
+        config.runAs = Env.accountUser
+        let fs = SFTPFileSystem(config: config, secrets: await store(password: nil, for: config))
+        try await fs.connect()
+        let home = try await fs.homeDirectory()
+        #expect(home == "/home/\(Env.accountUser)")
+
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("acct-\(UUID().uuidString)")
+        try randomData(100_000).write(to: tmp)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let remote = home + "/dockyard-\(UUID().uuidString.prefix(8)).bin"
+        try await fs.upload(tmp, to: remote, progress: Progress(totalUnitCount: 0))
+        let owner = try await fs.exec("stat -c %U \(remote)").stdoutString.trimmingCharacters(in: .whitespacesAndNewlines)
+        #expect(owner == Env.accountUser)
+        let whoami = try await fs.exec("whoami").stdoutString.trimmingCharacters(in: .whitespacesAndNewlines)
+        #expect(whoami == Env.accountUser)
+        await #expect(throws: (any Error).self) { try await fs.list("/root") }
+        try await fs.delete(remote, recursive: false)
+        await fs.disconnect()
+    }
+
+    @Test func throughRootNeedsARootLogin() async throws {
+        var config = sftpConfig(auth: .password)
+        config.runAs = Env.accountUser
+        let fs = SFTPFileSystem(config: config, secrets: await store(for: config))
+        await #expect(throws: (any Error).self) { try await fs.connect() }
+    }
+
     @Test func rootBrowsingFallsBackToNormalUserWhenElevationFails() async throws {
         var config = sftpConfig(auth: .password)
         config.elevation = .sudo

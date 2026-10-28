@@ -34,6 +34,46 @@ extension SSHSession {
         return path.isEmpty ? nil : path
     }
 
+    /// Whether `user` is safe to pass to `su` (cPanel and POSIX account names).
+    static func isValidAccountName(_ user: String) -> Bool {
+        guard let first = user.first, first != "-", user.count <= 64 else { return false }
+        return user.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || "._-".contains($0)) }
+    }
+
+    /// `command` run as `user` through `su`, for a session logged in as root. `-s /bin/sh` works even for
+    /// accounts without shell access; `su` sets HOME, so the command starts from the user's home folder.
+    static func asUser(_ user: String, _ command: String) throws -> String {
+        guard isValidAccountName(user) else { throw RemoteError.invalidConfiguration("\"\(user)\" is not a valid account name") }
+        return "su -s /bin/sh \(user) -c \(ShellQuote.quote("cd && " + command))"
+    }
+
+    /// Speaks SFTP to an `sftp-server` started as `user` from a root login, so files keep the account's ownership.
+    func openSFTP(asUser user: String) async throws -> SFTPClient {
+        guard let server = try await findSFTPServer() else {
+            throw RemoteError.unsupported("No sftp-server binary found in \(Self.sftpServerPaths.joined(separator: ", "))")
+        }
+        let command = try Self.asUser(user, "printf \"\(Self.readyMarker)\\n\"; exec \(server)")
+        let channel = try await perform { session in
+            let channel = try session.newChannel()
+            do { try channel.exec(command) } catch {
+                channel.close()
+                throw error
+            }
+            return channel
+        }
+        do {
+            let prefill = try await waitForReady(channel, kind: .none, password: nil, label: "su \(user)")
+            return try await perform { session in
+                let client = SFTPClient(session: session, channel: channel, prefill: prefill)
+                try client.handshake()
+                return client
+            }
+        } catch {
+            try? await perform { _ in channel.close() }
+            throw error
+        }
+    }
+
     /// Speaks SFTP to an `sftp-server` started as root through `sudo -S` (or `sudo -n` without a stored
     /// password) or through `su`. The password only travels over the encrypted channel and is never logged.
     func openElevatedSFTP(kind: Elevation, password: String?) async throws -> SFTPClient {
@@ -65,7 +105,7 @@ extension SSHSession {
         }
 
         do {
-            let prefill = try await waitForReady(channel, kind: kind, password: password)
+            let prefill = try await waitForReady(channel, kind: kind, password: password, label: kind == .su ? "su" : "sudo")
             let client = try await perform { session in
                 let client = SFTPClient(session: session, channel: channel, prefill: prefill)
                 try client.handshake()
@@ -79,7 +119,7 @@ extension SSHSession {
     }
 
     /// Reads until the ready marker, answering su's password prompt. Returns bytes that followed the marker.
-    private func waitForReady(_ channel: SSHChannel, kind: Elevation, password: String?) async throws -> [UInt8] {
+    private func waitForReady(_ channel: SSHChannel, kind: Elevation, password: String?, label: String) async throws -> [UInt8] {
         let marker = Data((Self.readyMarker + "\n").utf8)
         var stdout = Data()
         var stderr = Data()
@@ -103,7 +143,7 @@ extension SSHSession {
                 let text = (stderr + stdout).isEmpty ? "no output" : String(decoding: stderr + stdout, as: UTF8.self)
                 let line = text.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }
                     .first { !$0.isEmpty && !$0.lowercased().hasPrefix("password") } ?? "no output"
-                throw RemoteError.authenticationFailed("\(kind == .su ? "su" : "sudo"): \(line.prefix(120))")
+                throw RemoteError.authenticationFailed("\(label): \(line.prefix(120))")
             }
         }
     }

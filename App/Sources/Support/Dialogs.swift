@@ -61,6 +61,17 @@ enum Dialogs {
         return alert.runModal().rawValue - NSApplication.ModalResponse.alertFirstButtonReturn.rawValue
     }
 
+    /// Picks a private key from `~/.ssh`. Choosing `name.pub` returns `name` when it exists, since SSH needs the private half.
+    static func choosePrivateKey() -> String? {
+        let ssh = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".ssh")
+        guard let url = chooseFile(directory: ssh) else { return nil }
+        if url.pathExtension == "pub" {
+            let privateKey = url.deletingPathExtension()
+            if FileManager.default.fileExists(atPath: privateKey.path) { return privateKey.path }
+        }
+        return url.path
+    }
+
     static func chooseFile(directory: URL? = nil, canChooseDirectories: Bool = false, showHidden: Bool = true, types: [UTType]? = nil) -> URL? {
         let panel = NSOpenPanel()
         panel.canChooseFiles = !canChooseDirectories

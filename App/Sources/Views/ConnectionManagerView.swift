@@ -9,6 +9,8 @@ struct ConnectionManagerView: View {
     @Environment(\.openWindow) private var openWindow
     @State private var model = ConnectionManagerModel()
     @State private var showWHM = false
+    /// The server the WHM sheet opens on; nil opens it ready to add one.
+    @State private var whmToEdit: WHMSource?
 
     var body: some View {
         HStack(spacing: 0) {
@@ -59,6 +61,14 @@ struct ConnectionManagerView: View {
                 .padding(.horizontal, 12)
                 .frame(height: 26)
             }
+            if let source = selectedWHMSource {
+                Divider()
+                WHMSourcePanel(
+                    source: source, accountCount: model.count(for: .whm(source.id)),
+                    edit: { whmToEdit = source; showWHM = true },
+                    synced: { await model.reload(app: app) })
+                    .frame(width: 240)
+            }
         }
         .frame(minWidth: 900, minHeight: 520)
         .background(Palette.ground)
@@ -67,7 +77,7 @@ struct ConnectionManagerView: View {
         .task(id: model.key(app: app)) { await model.reload(app: app) }
         .onAppear { model.applyDemoScreen() }
         .sheet(item: editorBinding) { request in SiteEditorSheet(request: request) }
-        .sheet(isPresented: $showWHM) { WHMSheet(model: model) }
+        .sheet(isPresented: $showWHM, onDismiss: { whmToEdit = nil }) { WHMSheet(model: model, startWith: whmToEdit) }
     }
 
     private var editorBinding: Binding<SiteEditorRequest?> {
@@ -77,6 +87,11 @@ struct ConnectionManagerView: View {
     }
 
     private var isRemovedList: Bool { model.scope == .recentlyRemoved }
+
+    private var selectedWHMSource: WHMSource? {
+        guard case .whm(let id) = model.scope else { return nil }
+        return model.whmSources.first { $0.id == id }
+    }
 
     /// What the table shows: the filtered results, or the removed connections (searched by name and host).
     private var rows: [Connection] {
@@ -152,6 +167,7 @@ struct ConnectionManagerView: View {
                     scopeRow(source.label, icon: "server.rack", scope: .whm(source.id), count: model.count(for: .whm(source.id)))
                         .contextMenu {
                             Button("Open WHM") { app.openWHM(source) }
+                            Button("Edit Server\u{2026}") { whmToEdit = source; showWHM = true }
                             Button("Sync Now") { Task { _ = await app.syncWHM(source); await model.reload(app: app) } }
                         }
                 }
@@ -345,94 +361,5 @@ struct ConnectionManagerView: View {
         guard let url = Dialogs.chooseFile(
             directory: defaultFile.deletingLastPathComponent(), showHidden: true, types: [.xml]) else { return }
         Task { model.notice = await app.importFileZilla(from: url) }
-    }
-}
-
-struct WHMSheet: View {
-    @Environment(AppModel.self) private var app
-    @Environment(\.dismiss) private var dismiss
-    let model: ConnectionManagerModel
-    @State private var label = ""
-    @State private var host = ""
-    @State private var port = "2087"
-    @State private var apiUser = "root"
-    @State private var token = ""
-    @State private var busy = false
-    @State private var message: String?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("WHM servers").font(.headline)
-            if !model.whmSources.isEmpty {
-                VStack(spacing: 0) {
-                    ForEach(model.whmSources) { source in
-                        HStack {
-                            VStack(alignment: .leading) {
-                                Text(source.label)
-                                Text(syncText(source)).font(.caption).foregroundStyle(Palette.textSecondary)
-                            }
-                            Spacer()
-                            Button("Open WHM") { app.openWHM(source) }
-                                .help("Open WHM in your browser, already signed in")
-                            Button("Sync now") { sync(source) }.disabled(busy)
-                            Button(role: .destructive) {
-                                Task { try? await app.whmSources.delete(source.id); await model.reload(app: app) }
-                            } label: { Image(systemName: "trash") }
-                                .accessibilityLabel("Remove \(source.label)")
-                        }
-                        .padding(8)
-                        Divider()
-                    }
-                }
-                .background(Palette.chrome, in: RoundedRectangle(cornerRadius: 6))
-            }
-            Text("Add a server").font(.subheadline).foregroundStyle(Palette.textSecondary)
-            Form {
-                TextField("Label", text: $label, prompt: Text("Optional"))
-                TextField("Host", text: $host, prompt: Text("whm.example.com"))
-                TextField("API port", text: $port)
-                TextField("API user", text: $apiUser)
-                SecureField("API token", text: $token)
-            }
-            .formStyle(.columns)
-            if let message { Text(message).font(.callout).foregroundStyle(Palette.textSecondary) }
-            HStack {
-                if busy { ProgressView().controlSize(.small) }
-                Spacer()
-                Button("Close") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button("Add and Sync") { add() }
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(host.trimmingCharacters(in: .whitespaces).isEmpty || token.isEmpty || busy)
-            }
-        }
-        .padding(20)
-        .frame(width: 520)
-    }
-
-    private func syncText(_ s: WHMSource) -> String {
-        if let error = s.lastSyncError { return "Last sync failed: \(error)" }
-        guard let date = s.lastSyncAt else { return "\(s.host) \u{00B7} never synced" }
-        return "\(s.host) \u{00B7} last sync \(date.formatted(date: .abbreviated, time: .shortened))"
-    }
-
-    private func add() {
-        busy = true
-        let h = host.trimmingCharacters(in: .whitespaces)
-        let p = Int(port) ?? 2087
-        Task {
-            message = await app.addWHMSource(label: label, host: h, port: p, apiUser: apiUser, token: token)
-            token = ""
-            busy = false
-            await model.reload(app: app)
-        }
-    }
-
-    private func sync(_ source: WHMSource) {
-        busy = true
-        Task {
-            message = await app.syncWHM(source)
-            busy = false
-            await model.reload(app: app)
-        }
     }
 }

@@ -11,7 +11,7 @@ struct EditEntry: Identifiable, Equatable {
     var fileName: String { RemotePath.lastComponent(of: remotePath) }
 }
 
-/// Edit-in-place for server files: download, open in the default app, watch, upload on every save (HANDOFF 4).
+/// Edit-in-place for server files: download, open in the chosen editor, watch, upload on every save (HANDOFF 4).
 @MainActor @Observable
 final class EditCenter {
     private(set) var entries: [EditEntry] = []
@@ -41,11 +41,20 @@ final class EditCenter {
                 let edit = try await coordinator.open(
                     fs: fs, remotePath: item.path, connectionId: id, connectionName: name, beforeOverwrite: keepVersion)
                 await self.refresh()
-                NSWorkspace.shared.open(edit.localURL)
+                Self.openInEditor(edit.localURL)
             } catch {
-                session.operationError = "Open \(item.name): \(error.userMessage)"
+                session.operationError = "Edit \(item.name): \(error.userMessage)"
             }
         }
+    }
+
+    /// Opens `url` in the editor chosen in Settings, or in the file's default app when none is set.
+    static func openInEditor(_ url: URL) {
+        guard let editor = AppSettings.editorURL else {
+            NSWorkspace.shared.open(url)
+            return
+        }
+        NSWorkspace.shared.open([url], withApplicationAt: editor, configuration: NSWorkspace.OpenConfiguration())
     }
 
     func stop(_ id: UUID) {
