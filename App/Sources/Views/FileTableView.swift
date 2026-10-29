@@ -492,6 +492,8 @@ final class FileTableCoordinator: NSObject, NSTableViewDataSource, NSTableViewDe
             }
         }
         menu.addItem(.separator())
+        // A full folder may have no empty space to right-click, so New Folder is here too (it goes in the current folder).
+        add("New Folder\u{2026}", #selector(menuNewFolder))
         add("Refresh", #selector(menuRefresh))
     }
 
