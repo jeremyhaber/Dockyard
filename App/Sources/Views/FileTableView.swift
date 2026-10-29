@@ -491,6 +491,8 @@ final class FileTableCoordinator: NSObject, NSTableViewDataSource, NSTableViewDe
                 add("Versions\u{2026}", #selector(menuVersions), to: sub, enabled: session.status.isConnected)
             }
         }
+        menu.addItem(.separator())
+        add("Refresh", #selector(menuRefresh))
     }
 
     /// The menu for the current folder, from a right-click on empty space.

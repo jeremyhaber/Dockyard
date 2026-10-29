@@ -153,6 +153,7 @@ private struct FolderTab: View {
     let active: Bool
     let closable: Bool
     @State private var hovering = false
+    @State private var pressed = false
 
     private var title: String { path == "/" ? "/" : RemotePath.lastComponent(of: path) }
 
@@ -194,10 +195,16 @@ private struct FolderTab: View {
         .shadow(color: .black.opacity(active ? 0.06 : 0), radius: 1, y: 0.5)
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
-        .onTapGesture {
-            if NSEvent.modifierFlags.contains(.command) { return }
-            pane.activateTab(index)
-        }
+        // Switches on mouse-down like native tab bars: a tap gesture waits for mouse-up and is dropped
+        // when the pointer moves during the click.
+        .gesture(DragGesture(minimumDistance: 0)
+            .onChanged { _ in
+                guard !pressed else { return }
+                pressed = true
+                if NSEvent.modifierFlags.contains(.command) { return }
+                pane.activateTab(index)
+            }
+            .onEnded { _ in pressed = false })
         .help(path)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(active ? .isSelected : [])

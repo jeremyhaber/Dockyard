@@ -217,8 +217,12 @@ final class PaneModel {
 
     func closeActiveTab() { closeTab(at: state.activeIndex) }
 
+    /// Switching tabs re-lists the folder; clicking the tab that is already active refreshes it.
     func activateTab(_ index: Int) {
-        guard index != state.activeIndex else { return }
+        guard index != state.activeIndex else {
+            reload()
+            return
+        }
         state.activate(index)
         didChangeFolder(record: false)
     }
