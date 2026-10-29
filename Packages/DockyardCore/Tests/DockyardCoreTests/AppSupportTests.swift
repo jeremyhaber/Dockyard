@@ -30,6 +30,15 @@ import ConnectionKit
         try await repo.save(plain)
         let p = try #require(try await repo.connection(id: plain.id))
         #expect(p.cloud == nil && p.localFolder == nil)
+        #expect(p.localStart == .defaultFolder && !p.localStartOverridesRestore)
+    }
+
+    @Test func connectionKeepsLocalStart() async throws {
+        let repo = ConnectionRepository(database: try DockyardDatabase())
+        let c = Connection(name: "S", host: "h", username: "u", localStart: .scratch, localStartOverridesRestore: true)
+        try await repo.save(c)
+        let loaded = try #require(try await repo.connection(id: c.id))
+        #expect(loaded.localStart == .scratch && loaded.localStartOverridesRestore)
     }
 
     @Test func cloudPresets() {

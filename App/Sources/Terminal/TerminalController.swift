@@ -38,7 +38,7 @@ final class TerminalController {
 
     init(session: ConnectionSession) {
         self.session = session
-        let view = TerminalView(frame: NSRect(x: 0, y: 0, width: 640, height: 220))
+        let view = ShellTerminalView(frame: NSRect(x: 0, y: 0, width: 640, height: 220))
         view.nativeBackgroundColor = Palette.ns("DrawerBg")
         view.nativeForegroundColor = NSColor(white: 0.88, alpha: 1)
         view.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
@@ -78,6 +78,10 @@ final class TerminalController {
                 guard let self else { return }
                 self.shell = opened
                 self.phase = .running
+                // The view usually got its real size while the shell was opening, and that resize had no shell to
+                // go to. A shell left at the old width wraps lines in the wrong place and the caret jumps around.
+                let current = self.view.getTerminal()
+                if current.cols != cols || current.rows != rows { self.resize(cols: current.cols, rows: current.rows) }
                 for await data in opened.output {
                     self.view.feed(byteArray: ArraySlice(data))
                 }

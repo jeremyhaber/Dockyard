@@ -6,7 +6,7 @@ import Observation
 import RcloneKit
 
 enum DrawerTab: String, Hashable {
-    case log, terminal, transfers
+    case log, terminal, transfers, scratch
 }
 
 /// The Quick Connect bar's protocol menu.
@@ -73,6 +73,7 @@ final class AppModel {
     let prompts: PromptCenter
     let edits = EditCenter()
     let archives = ArchiveCenter()
+    let scratch = ScratchCenter()
     let transferUI = TransferCenter()
     let safety = SafetyCenter()
     let watches = WatchCenter()
@@ -126,6 +127,8 @@ final class AppModel {
     /// The "Web URL for folder" sheet over the main window.
     var webURLRequest: WebURLRequest?
     var dropHint: DropHint?
+    /// The connection name being edited in place, if any.
+    var renaming: RenameTarget?
     var compareVisible = false
     var toasts: [Toast] = []
     /// Menu titles for the change the next ⌘Z or ⇧⌘Z would undo or redo.
@@ -326,6 +329,7 @@ final class AppModel {
         Task { [weak self] in await self?.reloadQuickHistory() }
         edits.onEvent = { [weak self] event in self?.handleEdit(event) }
         edits.start()
+        if !DemoMode.isEnabled { scratch.start() }
     }
 
     private func refreshOpenConnectionRecords(_ list: [Connection]) {
@@ -343,6 +347,7 @@ final class AppModel {
         trackTransferFailures(snapshot)
         Notifier.shared.observe(snapshot)
         journalCompletedTransfers(snapshot)
+        scratch.transfersChanged(snapshot)
         let idle = snapshot.isIdle
         if idle && !wasIdle {
             for session in sessions { session.refreshPanes() }
@@ -545,8 +550,7 @@ final class AppModel {
         if c.icon == nil { FaviconStore.shared.refresh(FaviconCandidates.origins(for: c)) }
         session.setBrowsingAsRoot(await Self.isBrowsingAsRoot(fs))
         let home = (try? await fs.homeDirectory()) ?? "/"
-        var localHome = DemoMode.isEnabled ? "/Users/demo" : (AppSettings.localFolder ?? NSHomeDirectory())
-        if let folder = c.localFolder, !folder.isEmpty, FileManager.default.fileExists(atPath: folder) { localHome = folder }
+        let localHome = localStartFolder(for: c)
         let serverStart = initialPath ?? c.initialRemotePath ?? home
         let rules = FileSystemFactory.rules(for: c)
 
@@ -565,9 +569,13 @@ final class AppModel {
         if let restored {
             let st = restored.state
             serverState = PaneState(restoring: st.remoteTabs, active: st.activeRemoteTab, fallbackPath: serverStart, rules: rules)
-            localState = PaneState(restoring: st.localTabs, active: st.activeLocalTab, fallbackPath: localHome)
             serverExpanded = st.remoteTreeExpanded
-            localExpanded = st.localTreeExpanded
+            if c.localStartOverridesRestore {
+                localState = PaneState(initialPath: localHome)
+            } else {
+                localState = PaneState(restoring: st.localTabs, active: st.activeLocalTab, fallbackPath: localHome)
+                localExpanded = st.localTreeExpanded
+            }
         } else {
             serverState = PaneState(initialPath: serverStart, rules: rules)
             localState = PaneState(initialPath: localHome)

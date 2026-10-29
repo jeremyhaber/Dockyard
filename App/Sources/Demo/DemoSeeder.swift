@@ -35,7 +35,7 @@ enum DemoSeeder {
             username: "acme", isProd: true, favorite: true, tags: ["wordpress", "prod"], notes: "Main marketing site.",
             mountInFinder: true, mountOnLaunch: true,
             lastConnectedAt: ago(0.5 * hour), createdAt: ago(200 * day), initialRemotePath: "/home/acme/public_html",
-            localFolder: "/Users/demo/Sites/acme", keepVersionsOnOverwrite: true,
+            localFolder: "/Users/demo/Sites/acme", localStart: .folder, keepVersionsOnOverwrite: true,
             pinnedFolders: [
                 PinnedFolder(path: "/home/acme/public_html/wp-content/themes", label: "Themes"),
                 PinnedFolder(path: "/home/acme/public_html/wp-content/uploads"),

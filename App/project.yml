@@ -51,8 +51,8 @@ targets:
       path: Resources/Info.plist
       properties:
         CFBundleDisplayName: Dockyard
-        CFBundleShortVersionString: "1.1.2"
-        CFBundleVersion: "4"
+        CFBundleShortVersionString: "1.2.0"
+        CFBundleVersion: "5"
         LSMinimumSystemVersion: "14.0"
         LSApplicationCategoryType: public.app-category.developer-tools
         NSHumanReadableCopyright: "Copyright Dockyard"
@@ -69,6 +69,9 @@ targets:
               public.mime-type: application/vnd.dockyard.export
           - UTTypeIdentifier: app.dockyard.session
             UTTypeDescription: Dockyard connection tab
+            UTTypeConformsTo: [public.data]
+          - UTTypeIdentifier: app.dockyard.items
+            UTTypeDescription: Dockyard files being dragged
             UTTypeConformsTo: [public.data]
         CFBundleDocumentTypes:
           - CFBundleTypeName: Dockyard connection export
@@ -123,8 +126,8 @@ targets:
       path: FileProvider/Info.plist
       properties:
         CFBundleDisplayName: Dockyard Finder
-        CFBundleShortVersionString: "1.1.2"
-        CFBundleVersion: "4"
+        CFBundleShortVersionString: "1.2.0"
+        CFBundleVersion: "5"
         LSMinimumSystemVersion: "14.0"
         NSExtension:
           NSExtensionPointIdentifier: com.apple.fileprovider-nonui

@@ -188,6 +188,26 @@ func exercise(_ fs: any RemoteFileSystem, supportsPermissions: Bool = true, miss
         await fs.disconnect()
     }
 
+    @Test func reopensSFTPAfterTheServerClosesIt() async throws {
+        let config = sftpConfig(auth: .password)
+        let fs = SFTPFileSystem(config: config, secrets: await store(for: config))
+        let log = LogCollector(fs.logStream)
+        try await fs.connect()
+        let home = try await fs.homeDirectory()
+        // Only the SFTP channel goes away (an sftp-server idle timeout); the SSH connection stays up.
+        _ = try await fs.exec("pkill -9 -u \"$(id -u)\" -x sftp-server")
+        _ = try await fs.list(home)
+        // Actions that are not retried work on the next try too.
+        let folder = RemotePath.join(home, "reopen-\(UUID().uuidString.prefix(8))")
+        _ = try? await fs.exec("pkill -9 -u \"$(id -u)\" -x sftp-server")
+        _ = try? await fs.rename(RemotePath.join(home, "missing-a"), RemotePath.join(home, "missing-b"))
+        try await fs.mkdir(folder)
+        try await fs.delete(folder, recursive: true)
+        await fs.disconnect()
+        let lines = await log.snapshot()
+        #expect(lines.contains { $0.message.contains("SFTP channel closed, reopening") })
+    }
+
     @Test(arguments: [("id_ed25519", nil), ("id_ed25519_enc", Env.keyPassphrase)] as [(String, String?)])
     func keyAuth(keyName: String, passphrase: String?) async throws {
         let config = sftpConfig(auth: .key, key: Env.key(keyName))

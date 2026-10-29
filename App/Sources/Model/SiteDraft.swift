@@ -96,6 +96,8 @@ struct SiteDraft {
     var maxConnections = Connection.defaultMaxConnections
     var connectDelayMs = 0
     var localFolder = ""
+    var localStart = LocalStart.defaultFolder
+    var localStartOverridesRestore = false
     var restoreSession = true
     var treeRoot = FolderTreeRoot.home
     var jumpHost: UUID?
@@ -159,6 +161,8 @@ struct SiteDraft {
         maxConnections = c.maxConnections
         connectDelayMs = c.connectDelayMs
         localFolder = c.localFolder ?? ""
+        localStart = c.localStart
+        localStartOverridesRestore = c.localStartOverridesRestore
         restoreSession = c.restoreSession
         treeRoot = c.treeRoot
         jumpHost = c.jumpHost
@@ -237,6 +241,8 @@ struct SiteDraft {
         c.maxConnections = min(max(maxConnections, Connection.maxConnectionsRange.lowerBound), Connection.maxConnectionsRange.upperBound)
         c.connectDelayMs = max(0, connectDelayMs)
         c.localFolder = localFolder.trimmingCharacters(in: .whitespaces).isEmpty ? nil : localFolder
+        c.localStart = localStart == .folder && c.localFolder == nil ? .defaultFolder : localStart
+        c.localStartOverridesRestore = localStartOverridesRestore
         c.restoreSession = restoreSession
         c.treeRoot = treeRoot
         c.jumpHost = proto == .sftp ? jumpHost : nil

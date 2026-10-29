@@ -391,14 +391,18 @@ public final class SSHSession: @unchecked Sendable {
             guard isAlive, let handle = self.handle else { return }
             var next: Int32 = 0
             let rc = libssh2_keepalive_send(handle, &next)
-            if rc != 0 && rc != LIBSSH2_ERROR_EAGAIN {
-                log(.warning, "Keepalive failed; connection lost")
-                isAlive = false
-                for shell in Array(shells.values) { shell.finish() }
-            }
+            if rc != 0 && rc != LIBSSH2_ERROR_EAGAIN { dropTransport("Keepalive failed") }
         }
         timer.resume()
         keepAliveTimer = timer
+    }
+
+    /// Treats the connection as lost so the next use reconnects instead of waiting on a dead socket. Session queue only.
+    func dropTransport(_ reason: String) {
+        guard isAlive else { return }
+        log(.warning, "\(reason); connection lost")
+        isAlive = false
+        for shell in Array(shells.values) { shell.finish() }
     }
 
     // MARK: Closing

@@ -28,3 +28,6 @@ docs/internal/
 
 # Claude Code instructions, kept local
 CLAUDE.md
+
+# Local build/run notes
+BUILD-AND-RUN.md

@@ -51,6 +51,17 @@ extension DatabaseMigrator {
         }
     }
 
+    /// Where the local pane starts. Connections that already had a local folder keep starting there.
+    mutating func registerLocalStartMigration() {
+        registerMigration("v_local_start") { db in
+            try db.alter(table: "connection") { t in
+                t.add(column: "localStart", .text).notNull().defaults(to: "default")
+                t.add(column: "localStartOverridesRestore", .boolean).notNull().defaults(to: false)
+            }
+            try db.execute(sql: "UPDATE connection SET localStart = 'folder' WHERE localFolder IS NOT NULL AND localFolder != ''")
+        }
+    }
+
     /// Databases that ran an early `v_whm_account_login`, before it added `loginUser`, lack the column.
     mutating func registerLoginUserRepairMigration() {
         registerMigration("v_connection_login_user") { db in

@@ -238,9 +238,7 @@ struct ConnectionTab: View {
     var body: some View {
         HStack(spacing: 6) {
             StatusDot(status: session.status)
-            Text(session.connection.name)
-                .font(.system(size: 12, weight: active ? .semibold : .regular))
-                .lineLimit(1)
+            ConnectionNameField(session: session, place: .tab, font: .system(size: 12, weight: active ? .semibold : .regular))
             if session.connection.isProd { Badge(text: "PROD", style: .prod) }
             if session.connection.protocol == .rclone { Badge(text: "CLOUD", style: .cloud) }
             if session.connection.readOnly {
@@ -267,11 +265,13 @@ struct ConnectionTab: View {
             }
         }
         .contentShape(Rectangle())
-        .onTapGesture { app.activate(session) }
+        .gesture(TapGesture(count: 2).onEnded { app.renaming = RenameTarget(sessionID: session.id, place: .tab) })
+        .simultaneousGesture(TapGesture().onEnded { app.activate(session) })
         .reordersSession(session.id)
         .contextMenu {
             Button("Reconnect") { app.reconnect(session) }
             Button("Open in New Tab") { app.open(session.connection, newTab: true) }
+            Button("Rename\u{2026}") { app.renaming = RenameTarget(sessionID: session.id, place: .tab) }
             Divider()
             Button("Versions\u{2026}") { app.showVersions(for: session) }
                 .disabled(!session.status.isConnected)
