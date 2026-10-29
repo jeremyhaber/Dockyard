@@ -26,8 +26,11 @@ enum DropHandler {
         var items: [RemoteItem]
         var originSide: PaneSide
         var sameFileSystem: Bool
-        /// The session the drag started in, when that is not the target's session (server to server).
+        /// The session the drag started in, when that is not the target's session and its server files are dragged.
         var originSession: ConnectionSession?
+
+        /// Server to server between two connections, relayed through this Mac.
+        func isRelay(to side: PaneSide) -> Bool { originSession != nil && side == .server }
     }
 
     static func resolve(_ info: NSDraggingInfo, pane: PaneModel, session: ConnectionSession) -> Resolved? {
@@ -35,12 +38,14 @@ enum DropHandler {
             if origin.session == session.id {
                 return Resolved(items: DragState.items, originSide: origin.side, sameFileSystem: origin.side == pane.side)
             }
-            // Another connection's server column: relayed through this Mac.
-            if origin.side == .server, pane.side == .server,
-               let other = AppModel.shared.sessions.first(where: { $0.id == origin.session }) {
-                return Resolved(items: DragState.items, originSide: .server, sameFileSystem: false, originSession: other)
+            // This Mac is the same disk whichever connection's local pane the drag started in, so the rail of a group
+            // uploads to any of its columns.
+            if origin.side == .local {
+                return Resolved(items: DragState.items, originSide: .local, sameFileSystem: pane.side == .local)
             }
-            return nil
+            // Another connection's server files: relayed through this Mac to a server, or downloaded to it.
+            guard let other = AppModel.shared.sessions.first(where: { $0.id == origin.session }) else { return nil }
+            return Resolved(items: DragState.items, originSide: .server, sameFileSystem: false, originSession: other)
         }
         // Files dragged from Finder.
         guard let urls = info.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL],
@@ -62,7 +67,7 @@ enum DropHandler {
         let plan = DropPlanner.plan(
             items: resolved.items, destinationDirectory: directory,
             sameFileSystem: resolved.sameFileSystem, optionKey: option)
-        let isRelay = resolved.originSession != nil
+        let isRelay = resolved.isRelay(to: pane.side)
         switch plan {
         case .move:
             AppModel.shared.dropHint = hint(resolved, pane: pane, session: session, verb: "move")
@@ -107,7 +112,8 @@ enum DropHandler {
         case .copy:
             let source = resolved.originSession ?? session
             var rule: ConflictPolicy?
-            if option, resolved.originSession == nil {
+            let isRelay = resolved.isRelay(to: pane.side)
+            if option, !isRelay {
                 // Option on a transfer between this Mac and a server asks which rule to use for existing files.
                 guard let chosen = ConflictRuleMenu.choose(for: info) else {
                     DragState.clear()
@@ -117,7 +123,7 @@ enum DropHandler {
             }
             app.transfer(
                 resolved.items, from: source, resolved.originSide, to: session, pane.side, directory: directory,
-                move: resolved.originSession != nil && option, conflict: rule)
+                move: isRelay && option, conflict: rule)
         }
         DragState.clear()
         return true

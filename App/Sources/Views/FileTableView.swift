@@ -415,56 +415,104 @@ final class FileTableCoordinator: NSObject, NSTableViewDataSource, NSTableViewDe
         let clicked = table.clickedRow
         if clicked >= 0, !table.selectedRowIndexes.contains(clicked) {
             table.selectRowIndexes(IndexSet(integer: clicked), byExtendingSelection: false)
+        } else if clicked < 0 {
+            // Like Finder, a right-click on empty space is about the folder, not the selection.
+            table.deselectAll(nil)
         }
         let selection = selectedRows()
         let items = pane.selectedItems
         let hasSelection = !items.isEmpty
 
-        func add(_ title: String, _ action: Selector, enabled: Bool = true) {
+        func add(_ title: String, _ action: Selector, to target: NSMenu? = nil, enabled: Bool = true) {
             let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
             item.target = self
             item.isEnabled = enabled
+            (target ?? menu).addItem(item)
+        }
+        func submenu(_ title: String, _ build: (NSMenu) -> Void) {
+            let sub = NSMenu(title: title)
+            build(sub)
+            guard !sub.items.isEmpty else { return }
+            let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+            item.submenu = sub
             menu.addItem(item)
         }
 
+        // Items that don't apply are left out rather than dimmed. Right-clicking empty space gives the folder's menu.
+        let server = pane.side == .server
+        guard hasSelection else {
+            folderMenu(menu, add: { add($0, $1) }, server: server)
+            return
+        }
+        let singleFolder = items.count == 1 && items[0].isDirectory
         var editsFile = false
         if case .item(let item) = selection.first { editsFile = !item.isDirectory }
-        add(editsFile ? "Edit" : "Open", #selector(menuOpen), enabled: !selection.isEmpty)
-        add("Quick Look", #selector(menuQuickLook), enabled: items.contains { !$0.isDirectory })
-        if items.count == 1, items[0].isDirectory { add("Open in New Tab", #selector(menuOpenInTab)) }
+        add(editsFile ? "Edit" : "Open", #selector(menuOpen))
+        if items.contains(where: { !$0.isDirectory }) { add("Quick Look", #selector(menuQuickLook)) }
+        if singleFolder { add("Open in New Tab", #selector(menuOpenInTab)) }
         menu.addItem(.separator())
-        if pane.side == .local {
-            add("Upload", #selector(menuTransfer), enabled: hasSelection && session.status.isConnected)
+        if server {
+            add("Download", #selector(menuTransfer))
+            add("Download to Scratch", #selector(menuDownloadToScratch))
+            menu.items.last?.keyEquivalent = "d"
+            menu.items.last?.keyEquivalentModifierMask = [.command, .option]
         } else {
-            add("Download", #selector(menuTransfer), enabled: hasSelection)
+            add("Upload", #selector(menuTransfer), enabled: session.status.isConnected)
         }
         menu.addItem(.separator())
-        add("Rename…", #selector(menuRename), enabled: items.count == 1)
-        add("Delete…", #selector(menuDelete), enabled: hasSelection)
-        add("New Folder…", #selector(menuNewFolder))
+        add("Copy Path", #selector(menuCopyPath))
+        if server {
+            if items.contains(where: { app.webURL(for: $0.path, on: session.connection) != nil }) {
+                add("Copy Web URL", #selector(menuCopyWebURL))
+                if items.count == 1 { add("Open in Browser", #selector(menuOpenInBrowser)) }
+            }
+        } else {
+            add("Show in Finder", #selector(menuShowInFinder))
+        }
+        menu.addItem(.separator())
+        if items.count == 1 { add("Rename\u{2026}", #selector(menuRename)) }
+        add("Delete\u{2026}", #selector(menuDelete))
         menu.addItem(.separator())
         let canExtract = items.count == 1 && !items[0].isDirectory && ArchiveFormat.detect(fileName: items[0].name) != nil
-        add("Compress\u{2026}", #selector(menuCompress), enabled: hasSelection)
-        add("Extract Here", #selector(menuExtractHere), enabled: canExtract)
-        add("Extract to\u{2026}", #selector(menuExtractTo), enabled: canExtract)
-        menu.addItem(.separator())
-        add("Copy Path", #selector(menuCopyPath), enabled: hasSelection)
-        if pane.side == .server {
-            let mapped = (hasSelection ? items.map(\.path) : [pane.currentPath])
-                .contains { app.webURL(for: $0, on: session.connection) != nil }
-            add("Copy Web URL", #selector(menuCopyWebURL), enabled: mapped)
-            add("Open in Browser", #selector(menuOpenInBrowser), enabled: mapped && items.count <= 1)
-            add(WebURLResolver.mapping(for: webFolder, in: session.connection.webURLs) == nil ? "Set Web URL for Folder\u{2026}" : "Edit Web URL\u{2026}",
-                #selector(menuSetWebURL))
-            menu.addItem(.separator())
-            add("Permissions…", #selector(menuChmod), enabled: hasSelection)
-            let folder = items.count == 1 && items[0].isDirectory ? items[0].path : pane.currentPath
-            let pinned = app.safety.isPinned(folder, on: session.connection.id)
-            add(pinned ? "Unpin Folder" : "Pin Folder", #selector(menuPin))
-            add("Search This Folder\u{2026}", #selector(menuSearch))
-            add("Versions\u{2026}", #selector(menuVersions), enabled: session.status.isConnected)
+        submenu("Archive") { sub in
+            add("Compress\u{2026}", #selector(menuCompress), to: sub)
+            if canExtract {
+                add("Extract Here", #selector(menuExtractHere), to: sub)
+                add("Extract to\u{2026}", #selector(menuExtractTo), to: sub)
+            }
         }
+        if server {
+            submenu("More") { sub in
+                add("Permissions\u{2026}", #selector(menuChmod), to: sub)
+                if singleFolder {
+                    add(app.safety.isPinned(items[0].path, on: session.connection.id) ? "Unpin Folder" : "Pin Folder", #selector(menuPin), to: sub)
+                    add(webURLTitle, #selector(menuSetWebURL), to: sub)
+                }
+                add("Versions\u{2026}", #selector(menuVersions), to: sub, enabled: session.status.isConnected)
+            }
+        }
+    }
+
+    /// The menu for the current folder, from a right-click on empty space.
+    private func folderMenu(_ menu: NSMenu, add: (String, Selector) -> Void, server: Bool) {
+        add("New Folder\u{2026}", #selector(menuNewFolder))
         add("Refresh", #selector(menuRefresh))
+        menu.addItem(.separator())
+        add("Copy Path", #selector(menuCopyPath))
+        if server {
+            if app.webURL(for: pane.currentPath, on: session.connection) != nil { add("Open in Browser", #selector(menuOpenInBrowser)) }
+            add(webURLTitle, #selector(menuSetWebURL))
+            menu.addItem(.separator())
+            add(app.safety.isPinned(pane.currentPath, on: session.connection.id) ? "Unpin Folder" : "Pin Folder", #selector(menuPin))
+            add("Search This Folder\u{2026}", #selector(menuSearch))
+            if session.status.isConnected { add("Versions\u{2026}", #selector(menuVersions)) }
+        } else {
+            add("Show in Finder", #selector(menuShowInFinder))
+        }
+    }
+
+    private var webURLTitle: String {
+        WebURLResolver.mapping(for: webFolder, in: session.connection.webURLs) == nil ? "Set Web URL for Folder\u{2026}" : "Edit Web URL\u{2026}"
     }
 
     @objc private func menuOpen() { openSelection() }
@@ -484,6 +532,16 @@ final class FileTableCoordinator: NSObject, NSTableViewDataSource, NSTableViewDe
             guard let local = session.local else { return }
             app.transfer(items, from: session, .server, to: session, .local, directory: local.currentPath, move: false, conflict: nil)
         }
+    }
+
+    @objc private func menuDownloadToScratch() {
+        app.downloadToScratch(pane.selectedItems, from: session)
+    }
+
+    @objc private func menuShowInFinder() {
+        let items = pane.selectedItems
+        NSWorkspace.shared.activateFileViewerSelecting(
+            items.isEmpty ? [URL(fileURLWithPath: pane.currentPath)] : items.map { URL(fileURLWithPath: $0.path) })
     }
 
     @objc private func menuPin() {
@@ -552,7 +610,8 @@ final class FileTableCoordinator: NSObject, NSTableViewDataSource, NSTableViewDe
     }
 
     @objc private func menuCopyPath() {
-        Dialogs.copyToPasteboard(pane.selectedItems.map(\.path).joined(separator: "\n"))
+        let items = pane.selectedItems
+        Dialogs.copyToPasteboard(items.isEmpty ? pane.currentPath : items.map(\.path).joined(separator: "\n"))
     }
 
     /// The folder a web URL would be assigned to: the selected folder, else the current one.

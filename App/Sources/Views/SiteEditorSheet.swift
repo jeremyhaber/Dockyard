@@ -42,6 +42,7 @@ struct SiteEditorSheet: View {
                 SiteIconSection(draft: $draft)
                 if AppGroup.mountingAvailable { finderSection }
                 SiteEditorSafetySection(draft: $draft)
+                localSection
                 otherSection
             }
             .formStyle(.grouped)
@@ -179,6 +180,35 @@ struct SiteEditorSheet: View {
         }
     }
 
+    private var localSection: some View {
+        Section("Local folder") {
+            Picker("Start the local pane in", selection: $draft.localStart) {
+                Text("Default folder (\(defaultFolderName))").tag(LocalStart.defaultFolder)
+                Text("This folder").tag(LocalStart.folder)
+                Text("Scratch").tag(LocalStart.scratch)
+            }
+            .pickerStyle(.radioGroup)
+            if draft.localStart == .folder {
+                HStack {
+                    TextField("Folder", text: $draft.localFolder, prompt: Text("Choose a folder on this Mac"))
+                    Button("Choose\u{2026}") { chooseLocalFolder() }
+                }
+            } else if draft.localStart == .scratch {
+                Text("Downloads into Scratch are removed after \(ScratchSettings.lifetimeTitle).")
+                    .font(.caption).foregroundStyle(Palette.textSecondary)
+            }
+            if draft.restoreSession {
+                Toggle("Use it even when restoring the last session", isOn: $draft.localStartOverridesRestore)
+                Text("When this is off, a restored session reopens the local tabs it had last time.")
+                    .font(.caption).foregroundStyle(Palette.textSecondary)
+            }
+        }
+    }
+
+    private var defaultFolderName: String {
+        (AppSettings.localFolder ?? NSHomeDirectory()).replacingOccurrences(of: NSHomeDirectory(), with: "~")
+    }
+
     private var otherSection: some View {
         Section("Other") {
             Toggle("Read-only site", isOn: $draft.readOnly)
@@ -190,10 +220,6 @@ struct SiteEditorSheet: View {
                     draft.isProd = value
                     if draft.isNew { draft.mountReadOnly = value }
                 }))
-            HStack {
-                TextField("Local folder", text: $draft.localFolder, prompt: Text("Default: your home folder"))
-                Button("Choose\u{2026}") { chooseLocalFolder() }
-            }
             Stepper(value: $draft.maxConnections, in: Connection.maxConnectionsRange) {
                 LabeledContent("Max connections", value: "\(draft.maxConnections)")
             }
@@ -267,7 +293,10 @@ struct SiteEditorSheet: View {
     }
 
     private func chooseLocalFolder() {
-        if let url = Dialogs.chooseFile(canChooseDirectories: true) { draft.localFolder = url.path }
+        if let url = Dialogs.chooseFile(canChooseDirectories: true) {
+            draft.localFolder = url.path
+            draft.localStart = .folder
+        }
     }
 
     private func authorise() {

@@ -77,3 +77,13 @@ public enum FolderTreeRoot: String, Sendable, Hashable, Codable, CaseIterable {
     /// The tree's starting folder for a server whose login folder is `home`.
     public func path(home: String) -> String { self == .home ? PathTools.normalize(home) : "/" }
 }
+
+/// Where the local pane starts when a connection opens.
+public enum LocalStart: String, Sendable, Hashable, Codable, CaseIterable {
+    /// The default folder from Settings, else the home folder.
+    case defaultFolder = "default"
+    /// The connection's own `localFolder`.
+    case folder
+    /// The Scratch folder, whose downloads expire.
+    case scratch
+}

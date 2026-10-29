@@ -113,8 +113,12 @@ public struct Connection: Sendable, Hashable, Identifiable {
     public var initialRemotePath: String?
     /// Where the server pane's folder tree starts. `..` above it climbs further.
     public var treeRoot: FolderTreeRoot
-    /// Default local folder when there is no session to restore.
+    /// The local folder used when `localStart` is `.folder`.
     public var localFolder: String?
+    /// Where the local pane starts when there is no session to restore.
+    public var localStart: LocalStart
+    /// Starts the local pane at `localStart` even when the last session is restored.
+    public var localStartOverridesRestore: Bool
     /// Set for `rclone` connections.
     public var cloud: CloudSpec?
     /// Moves deleted files into the remote trash instead of deleting them. Off by default.
@@ -191,6 +195,8 @@ public struct Connection: Sendable, Hashable, Identifiable {
         initialRemotePath: String? = nil,
         treeRoot: FolderTreeRoot = .home,
         localFolder: String? = nil,
+        localStart: LocalStart = .defaultFolder,
+        localStartOverridesRestore: Bool = false,
         cloud: CloudSpec? = nil,
         trashOnDelete: Bool = false,
         keepVersionsOnOverwrite: Bool = false,
@@ -240,6 +246,8 @@ public struct Connection: Sendable, Hashable, Identifiable {
         self.initialRemotePath = initialRemotePath
         self.treeRoot = treeRoot
         self.localFolder = localFolder
+        self.localStart = localStart
+        self.localStartOverridesRestore = localStartOverridesRestore
         self.cloud = cloud
         self.trashOnDelete = trashOnDelete
         self.keepVersionsOnOverwrite = keepVersionsOnOverwrite
@@ -328,6 +336,8 @@ extension Connection: FetchableRecord, PersistableRecord, TableRecord {
             initialRemotePath: row["initialRemotePath"],
             treeRoot: (row["treeRoot"] as String?).flatMap(FolderTreeRoot.init(rawValue:)) ?? .home,
             localFolder: row["localFolder"],
+            localStart: (row["localStart"] as String?).flatMap(LocalStart.init(rawValue:)) ?? .defaultFolder,
+            localStartOverridesRestore: row["localStartOverridesRestore"],
             cloud: Self.decodeCloud(row),
             trashOnDelete: row["trashOnDelete"],
             keepVersionsOnOverwrite: row["keepVersionsOnOverwrite"],
@@ -396,6 +406,8 @@ extension Connection: FetchableRecord, PersistableRecord, TableRecord {
         container["initialRemotePath"] = initialRemotePath
         container["treeRoot"] = treeRoot.rawValue
         container["localFolder"] = localFolder
+        container["localStart"] = localStart.rawValue
+        container["localStartOverridesRestore"] = localStartOverridesRestore
         container["cloudBackend"] = cloud?.backend
         container["cloudOptions"] = try cloud.map { String(decoding: try JSONEncoder().encode($0.options), as: UTF8.self) }
         container["cloudRoot"] = cloud?.root

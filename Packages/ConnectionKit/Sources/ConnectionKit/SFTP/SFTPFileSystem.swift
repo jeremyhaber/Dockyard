@@ -126,19 +126,44 @@ public actor SFTPFileSystem: RemoteFileSystem, RemoteCommandRunner {
 
     /// Returns the live SFTP client, reconnecting if the server dropped us.
     private func client() async throws -> SFTPClient {
-        if let sftp, let ssh, await ssh.alive { return sftp }
+        if await isUsable(), let sftp { return sftp }
         guard shouldReconnect else { throw RemoteError.notConnected }
         if let reconnecting {
             try await reconnecting.value
         } else {
-            hub.emit(.status, "Connection lost, reconnecting...")
-            let task = Task { try await self.establish() }
+            let task = Task { try await self.restore() }
             reconnecting = task
             defer { reconnecting = nil }
             try await task.value
         }
         guard let sftp else { throw RemoteError.notConnected }
         return sftp
+    }
+
+    /// Whether the SSH transport is up and the SFTP channel on it still open.
+    private func isUsable() async -> Bool {
+        guard let sftp, let ssh else { return false }
+        return (try? await ssh.perform { _ in sftp.isOpen }) ?? false
+    }
+
+    /// Reopens just the SFTP channel when the server closed it on a live connection (the terminal keeps running),
+    /// otherwise logs in again.
+    private func restore() async throws {
+        if let ssh, await ssh.alive {
+            hub.emit(.status, "SFTP channel closed, reopening...")
+            if let sftp { try? await sftp.run { $0.close() } }
+            sftp = nil
+            isBrowsingAsRoot = false
+            do {
+                try await openSFTP(on: ssh)
+                hub.emit(.status, "SFTP subsystem ready")
+                return
+            } catch {
+                hub.emit(.warning, "Could not reopen SFTP (\(error)); reconnecting")
+            }
+        }
+        hub.emit(.status, "Connection lost, reconnecting...")
+        try await establish()
     }
 
     /// The live SSH session for shells and commands, reconnecting if needed.
@@ -154,7 +179,7 @@ public actor SFTPFileSystem: RemoteFileSystem, RemoteCommandRunner {
         do {
             return try await body(sftp)
         } catch {
-            guard shouldReconnect, let ssh, !(await ssh.alive) else { throw error }
+            guard shouldReconnect, !(await isUsable()) else { throw error }
             return try await body(try await client())
         }
     }

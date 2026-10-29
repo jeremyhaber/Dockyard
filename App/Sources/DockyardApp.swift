@@ -95,6 +95,14 @@ struct AppCommands: Commands {
                 .keyboardShortcut("w")
                 .disabled((pane?.state.tabs.count ?? 0) < 2)
             Divider()
+            Button("Download to Scratch") {
+                if let session = model.activeSession, let server = session.server {
+                    model.downloadToScratch(server.selectedItems, from: session)
+                }
+            }
+            .keyboardShortcut("d", modifiers: [.command, .option])
+            .disabled(model.activeSession?.server?.selectedItems.isEmpty ?? true)
+            Divider()
             Button("Disconnect") { if let s = model.activeSession { model.disconnect(s) } }
                 .keyboardShortcut("d", modifiers: [.command, .shift])
                 .disabled(!(model.activeSession?.status.isConnected ?? false))
@@ -161,6 +169,7 @@ struct AppCommands: Commands {
                 .keyboardShortcut("l", modifiers: [.command, .shift])
             Button("Toggle Terminal") { model.toggleDrawer(tab: .terminal) }
                 .keyboardShortcut("`", modifiers: .control)
+            Button(model.drawerVisible && model.drawerTab == .scratch ? "Hide Scratch" : "Show Scratch") { model.toggleDrawer(tab: .scratch) }
         }
 
         CommandMenu("Go") {

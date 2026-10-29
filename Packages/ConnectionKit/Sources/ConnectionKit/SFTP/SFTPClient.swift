@@ -14,6 +14,11 @@ final class SFTPClient: @unchecked Sendable {
     private var nextID: UInt32 = 1
     private var parked: [UInt32: SFTPResponse] = [:]
     private var abandoned: Set<UInt32> = []
+    /// Set when the channel failed or the server stopped answering.
+    private var isBroken = false
+
+    /// False once the server closed the channel or it failed; the client cannot be used again.
+    var isOpen: Bool { !isBroken && !channel.isEOF }
 
     /// `prefill` holds bytes already read from the channel past a start-up marker.
     init(session: SSHSession, channel: SSHChannel, prefill: [UInt8] = []) {
@@ -64,9 +69,20 @@ final class SFTPClient: @unchecked Sendable {
                 limit = session.deadline(session.options.operationTimeout)
                 continue
             }
-            if channel.isEOF { throw RemoteError.protocolError("SFTP connection closed by the server") }
+            if channel.isEOF {
+                isBroken = true
+                throw RemoteError.protocolError("SFTP connection closed by the server")
+            }
             guard blocking else { return nil }
-            try session.waitForSocket(until: limit, what: "SFTP")
+            do {
+                try session.waitForSocket(until: limit, what: "SFTP")
+            } catch {
+                // A reply that never comes means the network dropped us without a reset (sleep, Wi-Fi change, NAT
+                // timeout). Waiting again on the same socket would hang every later action the same way.
+                isBroken = true
+                session.dropTransport("SFTP stopped answering")
+                throw error
+            }
         }
     }
 
@@ -84,7 +100,10 @@ final class SFTPClient: @unchecked Sendable {
         var writer = SFTPWriter(type: type)
         writer.u32(id)
         build(&writer)
-        try channel.write(writer.packet())
+        do { try channel.write(writer.packet()) } catch {
+            isBroken = true
+            throw error
+        }
         return id
     }
 

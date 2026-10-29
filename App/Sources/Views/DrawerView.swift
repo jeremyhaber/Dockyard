@@ -20,10 +20,11 @@ struct DrawerView: View {
                     Text("Log").tag(DrawerTab.log)
                     Text("Terminal").tag(DrawerTab.terminal)
                     Text("Transfers").tag(DrawerTab.transfers)
+                    Text(app.scratch.items.isEmpty ? "Scratch" : "Scratch (\(app.scratch.items.count))").tag(DrawerTab.scratch)
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
-                .frame(width: 240)
+                .frame(width: 340)
                 switch app.drawerTab {
                 case .log:
                     Spacer(minLength: 0)
@@ -45,6 +46,8 @@ struct DrawerView: View {
                     }
                 case .transfers:
                     TransfersHeader()
+                case .scratch:
+                    ScratchHeader()
                 }
                 Button {
                     app.drawerVisible = false
@@ -58,6 +61,9 @@ struct DrawerView: View {
             .padding(.horizontal, 10)
             .frame(height: 32)
             .background(Palette.drawer)
+            if app.drawerTab == .log || app.drawerTab == .terminal, let groupID = app.activeGroupID {
+                DrawerConnectionTabs(members: app.members(of: groupID))
+            }
             Group {
                 switch app.drawerTab {
                 case .log:
@@ -69,12 +75,16 @@ struct DrawerView: View {
                     }
                 case .terminal:
                     if let session {
+                        // A pane per connection, so switching connections starts that one's shell.
                         TerminalPane(session: session)
+                            .id(session.id)
                     } else {
                         placeholder(icon: "terminal", text: "Open a connection to use its terminal.")
                     }
                 case .transfers:
                     TransfersView()
+                case .scratch:
+                    ScratchView()
                 }
             }
         }
@@ -150,6 +160,47 @@ struct DrawerView: View {
     private func copy() {
         guard let session = app.activeSession else { return }
         Dialogs.copyToPasteboard(session.log.copyText(errorsOnly: errorsOnly))
+    }
+}
+
+/// In side by side, one tab per column above the log and terminal. Each connection keeps its own shell running;
+/// picking a tab makes that column the active one, as clicking it would.
+private struct DrawerConnectionTabs: View {
+    @Environment(AppModel.self) private var app
+    let members: [ConnectionSession]
+
+    var body: some View {
+        ScrollView(.horizontal) {
+            HStack(spacing: 2) {
+                ForEach(members) { session in
+                    let active = session.id == app.activeSessionID
+                    Button { app.activeSessionID = session.id } label: {
+                        HStack(spacing: 6) {
+                            StatusDot(status: session.status)
+                            Text(session.connection.name)
+                                .font(.system(size: 11, weight: active ? .semibold : .regular))
+                                .lineLimit(1)
+                        }
+                        .padding(.horizontal, 10)
+                        .frame(height: 22)
+                        .background(active ? Color.white.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 5))
+                        .overlay(alignment: .bottom) {
+                            if active, let color = session.connection.color { color.color.frame(height: 2).padding(.horizontal, 6) }
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.white.opacity(active ? 0.95 : 0.65))
+                    .help("Show \(session.connection.name)'s \(app.drawerTab == .terminal ? "terminal" : "log")")
+                    .accessibilityAddTraits(active ? .isSelected : [])
+                }
+            }
+            .padding(.horizontal, 8)
+        }
+        .scrollIndicators(.hidden)
+        .frame(height: 28)
+        .background(Palette.drawer)
+        .overlay(alignment: .bottom) { Divider() }
     }
 }
 

@@ -165,7 +165,7 @@ struct ServerColumn: View {
     private func header(active: Bool) -> some View {
         HStack(spacing: 6) {
             StatusDot(status: session.status)
-            Text(session.connection.name).font(.system(size: 12, weight: .semibold)).lineLimit(1)
+            ConnectionNameField(session: session, place: .column, font: .system(size: 12, weight: .semibold))
             if session.connection.isProd { Badge(text: "PROD", style: .prod) }
             if session.connection.protocol == .rclone { Badge(text: "CLOUD", style: .cloud) }
             if session.browsingAsRoot { Badge(text: "ROOT", style: .root) }
@@ -182,10 +182,12 @@ struct ServerColumn: View {
         .frame(height: 26)
         .background(session.connection.color?.fill(active: active) ?? (active ? Palette.selection : Palette.chrome))
         .contentShape(Rectangle())
-        .onTapGesture { app.activeSessionID = session.id }
+        .gesture(TapGesture(count: 2).onEnded { app.renaming = RenameTarget(sessionID: session.id, place: .column) })
+        .simultaneousGesture(TapGesture().onEnded { app.activeSessionID = session.id })
         .reordersSession(session.id)
         .contextMenu {
             ConnectionColorMenu(connection: session.connection)
+            Button("Rename\u{2026}") { app.renaming = RenameTarget(sessionID: session.id, place: .column) }
             Button("Edit Connection\u{2026}") { app.editConnection(session.connection, origin: .main) }
             Divider()
             TabGroupMenuItems(session: session)
