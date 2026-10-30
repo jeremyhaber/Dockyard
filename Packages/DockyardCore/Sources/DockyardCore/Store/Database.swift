@@ -177,6 +177,7 @@ public final class DockyardDatabase: Sendable {
         migrator.registerWHMAccountLoginMigration()
         migrator.registerLoginUserRepairMigration()
         migrator.registerLocalStartMigration()
+        migrator.registerImmediateTransfersMigration()
         return migrator
     }
 }

@@ -104,6 +104,8 @@ public actor TransferQueue {
 
     var resolving = false
     var resolveWaiters: [CheckedContinuation<Void, Never>] = []
+    /// Queued immediate jobs. They never enter a site's lanes, so pause and the limits do not hold them back.
+    var urgent: [JobRecord] = []
 
     public init(
         maxConcurrent: Int = 10,
@@ -249,6 +251,7 @@ public actor TransferQueue {
             sourcePath: request.sourcePath, destPath: request.destinationPath, isDirectory: request.isDirectory,
             size: request.size, modified: request.modified, createParents: request.createParents,
             recursive: request.recursive, deleteSource: request.deleteSourceAfter, conflict: request.conflictOverride)
+        record.immediate = request.immediate
         record.state = .queued
         addQueued(record)
         return JobID.uuid(id)
@@ -260,7 +263,7 @@ public actor TransferQueue {
         ops.append { db in try db.run(JobRecord.insertSQL, record.arguments) }
         scheduleFlush()
         let site = siteState(record.siteKey, label: record.siteKey == JobRecord.localKey ? "This Mac" : record.srcLabel)
-        if record.isDirectory { site.dirs.add(record) } else { site.files.add(record) }
+        if record.immediate { urgent.append(record) } else if record.isDirectory { site.dirs.add(record) } else { site.files.add(record) }
     }
 
     // MARK: Scheduling
@@ -268,6 +271,7 @@ public actor TransferQueue {
     func pump() {
         let now = clock.now()
         reapIdle(now: now)
+        startUrgent(now: now)
         if !isPaused {
             while active.count < maxConcurrent, let (site, record) = nextRunnable(now: now) {
                 start(record, on: site, now: now)
@@ -279,6 +283,14 @@ public actor TransferQueue {
         }
         armWake(now: now)
         checkIdle()
+    }
+
+    private func startUrgent(now: Date) {
+        urgent.removeAll { record in
+            guard let site = sites[record.siteKey], site.isResolved else { return false }
+            start(record, on: site, now: now)
+            return true
+        }
     }
 
     private func nextRunnable(now: Date) -> (SiteState, JobRecord)? {
@@ -574,6 +586,7 @@ public actor TransferQueue {
         }
         stats.add(record)
         persist(record)
+        if record.immediate { urgent.append(record); return }
         let site = siteState(record.siteKey, label: record.srcLabel)
         site.retry.append((clock.now().addingTimeInterval(delay), record))
     }

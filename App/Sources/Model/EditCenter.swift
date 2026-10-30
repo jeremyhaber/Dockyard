@@ -16,11 +16,12 @@ struct EditEntry: Identifiable, Equatable {
 final class EditCenter {
     private(set) var entries: [EditEntry] = []
 
-    @ObservationIgnored private let coordinator = EditInPlaceCoordinator()
+    @ObservationIgnored private var coordinator = EditInPlaceCoordinator()
     @ObservationIgnored var onEvent: ((EditEvent) -> Void)?
 
-    /// Starts listening for coordinator events. Called once by `AppModel`.
-    func start() {
+    /// Starts listening for coordinator events. Called once by `AppModel`, whose queue then runs (and lists) every download and upload.
+    func start(queue: TransferQueue) {
+        coordinator = EditInPlaceCoordinator(queue: queue)
         let coordinator = self.coordinator
         Task {
             for await event in await coordinator.events() {

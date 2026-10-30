@@ -492,14 +492,19 @@ final class TransferTableCoordinator: NSObject, NSTableViewDataSource, NSTableVi
             item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
             menu.addItem(item)
         }
-        if jobs.contains(where: { $0.state == .failed || $0.state == .cancelled }) { add("Retry", "arrow.clockwise", #selector(retry)) }
+        if jobs.contains(where: Self.retryable) { add("Retry", "arrow.clockwise", #selector(retry)) }
         if jobs.contains(where: { $0.state == .queued || $0.state == .running }) { add("Cancel", "xmark.circle", #selector(cancel)) }
         if jobs.count == 1, jobs[0].isDirectory, jobs[0].childCount > 0 { add("Show Items", "folder", #selector(showItems)) }
         if jobs.count == 1 { add("Reveal", "arrow.right.circle", #selector(reveal)) }
         if jobs.contains(where: { $0.error != nil }) { add("Copy Error", "doc.on.doc", #selector(copyError)) }
     }
 
-    @objc private func retry() { for job in targetJobs() where job.state == .failed || job.state == .cancelled { AppModel.shared.retryTransfer(job.id) } }
+    @objc private func retry() { for job in targetJobs() where Self.retryable(job) { AppModel.shared.retryTransfer(job.id) } }
+
+    /// Edit-in-place jobs are retried by their edit session, not from here.
+    private static func retryable(_ job: TransferJobInfo) -> Bool {
+        job.canRetry && (job.state == .failed || job.state == .cancelled)
+    }
     @objc private func cancel() { for job in targetJobs() where job.state == .queued || job.state == .running { AppModel.shared.cancelTransfer(job.id) } }
     @objc private func reveal() { if let job = targetJobs().first { AppModel.shared.revealTransfer(job) } }
     @objc private func copyError() { AppModel.shared.copyTransferErrors(targetJobs()) }

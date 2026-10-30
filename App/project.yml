@@ -51,8 +51,8 @@ targets:
       path: Resources/Info.plist
       properties:
         CFBundleDisplayName: Dockyard
-        CFBundleShortVersionString: "1.2.2"
-        CFBundleVersion: "7"
+        CFBundleShortVersionString: "1.2.3"
+        CFBundleVersion: "8"
         LSMinimumSystemVersion: "14.0"
         LSApplicationCategoryType: public.app-category.developer-tools
         NSHumanReadableCopyright: "Copyright Dockyard"
@@ -126,8 +126,8 @@ targets:
       path: FileProvider/Info.plist
       properties:
         CFBundleDisplayName: Dockyard Finder
-        CFBundleShortVersionString: "1.2.2"
-        CFBundleVersion: "7"
+        CFBundleShortVersionString: "1.2.3"
+        CFBundleVersion: "8"
         LSMinimumSystemVersion: "14.0"
         NSExtension:
           NSExtensionPointIdentifier: com.apple.fileprovider-nonui

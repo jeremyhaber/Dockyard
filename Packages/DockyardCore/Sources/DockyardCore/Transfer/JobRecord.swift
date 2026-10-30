@@ -98,6 +98,8 @@ struct JobRecord: Sendable {
     /// Files: resume a partial file. Folders: re-run an interrupted listing, skipping known children.
     var resume = false
     var attempts = 0
+    /// Starts at once, ignoring pause and the connection limit, and cannot be retried (edit in place).
+    var immediate = false
 
     var name: String { RemotePath.lastComponent(of: destPath) }
     var route: String { "\(srcLabel) → \(dstLabel)" }
@@ -107,17 +109,17 @@ struct JobRecord: Sendable {
     static let columns = """
         id, parentId, rootId, siteKey, srcSite, dstSite, srcLabel, dstLabel, sourcePath, destPath, isDirectory, size, \
         modified, createParents, recursive, deleteSource, conflict, state, bytesDone, bytesTotal, error, expanded, \
-        childCount, childrenDone, resume, attempts
+        childCount, childrenDone, resume, attempts, immediate
         """
 
-    static let insertSQL = "INSERT OR REPLACE INTO transferJob (\(columns)) VALUES (\(Array(repeating: "?", count: 26).joined(separator: ",")))"
+    static let insertSQL = "INSERT OR REPLACE INTO transferJob (\(columns)) VALUES (\(Array(repeating: "?", count: 27).joined(separator: ",")))"
 
     var arguments: StatementArguments {
         [
             id, parentId, rootId, siteKey, srcSite, dstSite, srcLabel, dstLabel, sourcePath, destPath, isDirectory,
             size.map { Int64(clamping: $0) }, modified?.timeIntervalSince1970, createParents, recursive, deleteSource,
             conflict?.dbValue, state.dbValue, Int64(clamping: bytesDone), Int64(clamping: bytesTotal), error, expanded,
-            childCount, childrenDone, resume, attempts,
+            childCount, childrenDone, resume, attempts, immediate,
         ]
     }
 
@@ -146,7 +148,7 @@ struct JobRecord: Sendable {
         bytesDone = UInt64(max(0, row["bytesDone"] as Int64)); bytesTotal = UInt64(max(0, row["bytesTotal"] as Int64))
         error = row["error"]; expanded = row["expanded"]
         childCount = row["childCount"]; childrenDone = row["childrenDone"]
-        resume = row["resume"]; attempts = row["attempts"]
+        resume = row["resume"]; attempts = row["attempts"]; immediate = row["immediate"]
     }
 
     /// A child that inherits routing from this folder.

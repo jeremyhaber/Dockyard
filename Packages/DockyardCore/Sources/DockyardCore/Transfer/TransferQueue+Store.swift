@@ -112,7 +112,7 @@ extension TransferQueue {
         let rows: [JobRecord] = (try? await writer.read { db in
             try Row.fetchAll(
                 db,
-                sql: "SELECT \(JobRecord.columns) FROM transferJob WHERE siteKey = ? AND isDirectory = ? AND state = 0 AND id > ? ORDER BY id LIMIT ?",
+                sql: "SELECT \(JobRecord.columns) FROM transferJob WHERE siteKey = ? AND isDirectory = ? AND state = 0 AND immediate = 0 AND id > ? ORDER BY id LIMIT ?",
                 arguments: [key, directories, cursor, limit]).map(JobRecord.init(row:))
         }) ?? []
         guard let site = sites[key] else { return }
@@ -143,13 +143,15 @@ extension TransferQueue {
                 UPDATE transferJob SET state = 0, resume = CASE WHEN isDirectory = 0 THEN bytesDone > 0 ELSE 1 END
                 WHERE state = 1 AND (isDirectory = 0 OR expanded = 0)
                 """)
+            // Immediate jobs belonged to an edit session that ended with the app; nothing will run or retry them.
+            try db.run("DELETE FROM transferJob WHERE immediate = 1 AND state IN (0, 3)")
             out.maxId = try Int64.fetchOne(db, sql: "SELECT MAX(id) FROM transferJob") ?? 0
             out.stats = try aggregateStats(db)
             out.unfinished = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM transferJob WHERE state IN (0, 1)") ?? 0
             out.trackers = try buildTrackers(db)
             let keys = try Row.fetchAll(db, sql: """
                 SELECT DISTINCT siteKey, CASE WHEN srcSite IS NULL THEN dstLabel ELSE srcLabel END AS label
-                FROM transferJob WHERE state IN (0, 3, 4) AND siteKey != ?
+                FROM transferJob WHERE state IN (0, 3, 4) AND immediate = 0 AND siteKey != ?
                 """, arguments: [JobRecord.localKey])
             var seen = Set<String>()
             for row in keys {
@@ -255,7 +257,7 @@ extension TransferQueue {
             id: JobID.uuid(r.id), parentId: r.parentId.map(JobID.uuid), name: r.name, sourcePath: r.sourcePath,
             destinationPath: r.destPath, route: r.route, isRelay: r.isRelay, isDirectory: r.isDirectory, state: r.state,
             bytesDone: done, bytesTotal: total, error: r.error, childCount: r.childCount, finishedChildCount: r.childrenDone,
-            willResume: r.resume && !r.isDirectory)
+            willResume: r.resume && !r.isDirectory, canRetry: !r.immediate)
     }
 
     public func job(_ id: UUID) async -> TransferJobInfo? {
