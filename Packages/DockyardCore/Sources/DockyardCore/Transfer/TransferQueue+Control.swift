@@ -31,6 +31,7 @@ extension TransferQueue {
                 """, [row])
         }
         for id in ids { trackers.removeValue(forKey: id) }
+        urgent.removeAll { ids.contains($0.id) }
         if !wasRunning, let parent = record.parentId { childFinished(parent, state: .cancelled) }
         flushSync()
         reloadStats()
@@ -50,6 +51,7 @@ extension TransferQueue {
             try db.run("UPDATE transferJob SET state = 4 WHERE state = 0 OR (state = 1 AND isDirectory = 1 AND expanded = 1)")
         }
         trackers.removeAll()
+        urgent.removeAll()
         reloadStats()
         resetLanes()
         settleWaiters()
@@ -79,7 +81,7 @@ extension TransferQueue {
             try db.run(prefix + """
                  UPDATE transferJob SET state = 0, error = NULL,
                    resume = CASE WHEN isDirectory = 0 THEN bytesDone > 0 ELSE 1 END
-                 WHERE id IN (\(scope)) AND state IN \(states) AND (isDirectory = 0 OR expanded = 0)
+                 WHERE id IN (\(scope)) AND state IN \(states) AND (isDirectory = 0 OR expanded = 0) AND immediate = 0
                 """, args)
             // Listed folders wait for their children again, or only for removing their source.
             for _ in 0..<64 {
@@ -115,6 +117,22 @@ extension TransferQueue {
     /// Forgets failed top-level jobs together with their children.
     public func removeFailed() { remove(topLevelStates: "3") }
 
+    /// Forgets finished top-level jobs by id together with their children. Unfinished ones are left alone.
+    public func remove(_ ids: [UUID]) {
+        let rows = ids.compactMap(JobID.row)
+        guard !rows.isEmpty else { return }
+        persistActive()
+        flushSync()
+        try? writer.write { db in
+            try db.run("""
+                DELETE FROM transferJob WHERE rootId IN (SELECT id FROM transferJob
+                  WHERE parentId IS NULL AND state >= 2 AND id IN (\(rows.map(String.init).joined(separator: ","))))
+                """)
+        }
+        reloadStats()
+        publishSoon()
+    }
+
     private func remove(topLevelStates states: String) {
         persistActive()
         flushSync()
@@ -132,9 +150,10 @@ extension TransferQueue {
     // MARK: Pause
 
     /// Stops starting jobs and interrupts the running ones, which return to the queue and resume where they stopped.
+    /// Immediate jobs carry on.
     public func pause() {
         isPaused = true
-        interrupt(Array(active.values))
+        interrupt(active.values.filter { !$0.record.immediate })
         publishSoon()
     }
 
@@ -147,7 +166,7 @@ extension TransferQueue {
     public func pauseSite(_ id: UUID) {
         guard let site = sites[id.uuidString] else { return }
         site.isPaused = true
-        interrupt(active.values.filter { $0.leases.contains { $0.site === site } })
+        interrupt(active.values.filter { !$0.record.immediate && $0.leases.contains { $0.site === site } })
         publishSoon()
     }
 

@@ -125,6 +125,8 @@ public actor EditInPlaceCoordinator {
         var dirty = false
         var unsynced = false
         var versionKept = false
+        /// Failed upload jobs in the queue, removed once a later upload gets the changes to the server.
+        var failedJobs: [UUID] = []
         let beforeOverwrite: BeforeOverwrite?
         init(session: EditSession, fs: any RemoteFileSystem, beforeOverwrite: BeforeOverwrite?) {
             self.session = session; self.fs = fs; self.beforeOverwrite = beforeOverwrite
@@ -133,15 +135,19 @@ public actor EditInPlaceCoordinator {
 
     private let watcher: any FileChangeWatcher
     private let root: URL
+    /// When set, downloads and uploads run as queue jobs so they show in the Transfers list.
+    private let queue: TransferQueue?
     private var live: [UUID: Live] = [:]
     private var subscribers: [UUID: AsyncStream<EditEvent>.Continuation] = [:]
 
     public init(
         watcher: any FileChangeWatcher = PollingFileWatcher(),
-        rootDirectory: URL = FileManager.default.temporaryDirectory.appendingPathComponent("dockyard-edit")
+        rootDirectory: URL = FileManager.default.temporaryDirectory.appendingPathComponent("dockyard-edit"),
+        queue: TransferQueue? = nil
     ) {
         self.watcher = watcher
         self.root = rootDirectory
+        self.queue = queue
     }
 
     public var sessions: [EditSession] { live.values.map(\.session).sorted { $0.remotePath < $1.remotePath } }
@@ -166,7 +172,7 @@ public actor EditInPlaceCoordinator {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let local = dir.appendingPathComponent(RemotePath.lastComponent(of: remotePath))
         do {
-            try await Self.download(fs, remotePath, to: local)
+            try await download(fs, remotePath, to: local, label: connectionName)
         } catch {
             try? FileManager.default.removeItem(at: dir)
             throw error
@@ -199,6 +205,10 @@ public actor EditInPlaceCoordinator {
         entry.watchTask?.cancel()
         if force || !entry.unsynced {
             try? FileManager.default.removeItem(at: entry.session.localURL.deletingLastPathComponent())
+            if let queue, !entry.failedJobs.isEmpty {
+                let ids = entry.failedJobs
+                Task { await queue.remove(ids) }
+            }
         }
         emit(entry.session, .closed)
     }
@@ -241,20 +251,52 @@ public actor EditInPlaceCoordinator {
                 try await keep(s.remotePath, entry.fs)
                 entry.versionKept = true
             }
-            try await Self.upload(entry.fs, s.localURL, to: s.remotePath)
+            try await upload(entry.fs, s.localURL, to: s.remotePath, label: s.connectionName, size: bytes)
             if let item = try? await entry.fs.lookup(s.remotePath) { entry.baseModified = item.modified; entry.baseSize = item.size }
             entry.unsynced = entry.dirty  // a newer save may already be waiting
+            if let queue, !entry.failedJobs.isEmpty {
+                await queue.remove(entry.failedJobs)
+                entry.failedJobs = []
+            }
             emit(s, .uploaded(bytes: bytes))
         } catch {
+            if let failed = error as? QueuedTransferError { entry.failedJobs.append(failed.jobId) }
             emit(s, .uploadFailed(TransferQueue.describe(error)))
         }
     }
 
-    private nonisolated static func download(_ fs: any RemoteFileSystem, _ remote: String, to local: URL) async throws {
-        try await fs.download(remote, to: local, progress: Progress(totalUnitCount: 0), resume: false)
+    private func download(_ fs: any RemoteFileSystem, _ remote: String, to local: URL, label: String) async throws {
+        guard let queue else {
+            return try await fs.download(remote, to: local, progress: Progress(totalUnitCount: 0), resume: false)
+        }
+        try await Self.run(queue, TransferRequest(
+            source: TransferEndpoint(fs: fs, label: label), sourcePath: remote,
+            destination: .thisMac(), destinationPath: local.path, conflictOverride: .overwrite, immediate: true))
     }
 
-    private nonisolated static func upload(_ fs: any RemoteFileSystem, _ local: URL, to remote: String) async throws {
-        try await fs.upload(local, to: remote, progress: Progress(totalUnitCount: 0), resume: false)
+    private func upload(_ fs: any RemoteFileSystem, _ local: URL, to remote: String, label: String, size: UInt64) async throws {
+        guard let queue else {
+            return try await fs.upload(local, to: remote, progress: Progress(totalUnitCount: 0), resume: false)
+        }
+        // No site id: the job runs on the session's own connection, and the safety net version was kept above.
+        try await Self.run(queue, TransferRequest(
+            source: .thisMac(), sourcePath: local.path, destination: TransferEndpoint(fs: fs, label: label),
+            destinationPath: remote, size: size, conflictOverride: .overwrite, immediate: true))
     }
+
+    /// Immediate jobs: an edit never waits behind other transfers or a paused queue, and failures come back here.
+    private nonisolated static func run(_ queue: TransferQueue, _ request: TransferRequest) async throws {
+        let id = await queue.enqueue(request)
+        let state = await queue.waitUntilFinished(id)
+        guard state != .completed else { return }
+        if state == .cancelled { throw CancellationError() }
+        throw QueuedTransferError(jobId: id, message: await queue.job(id)?.error ?? "Transfer did not complete")
+    }
+}
+
+/// A queued edit transfer that ended without completing; carries the queue's error text.
+struct QueuedTransferError: Error, LocalizedError {
+    var jobId: UUID
+    var message: String
+    var errorDescription: String? { message }
 }

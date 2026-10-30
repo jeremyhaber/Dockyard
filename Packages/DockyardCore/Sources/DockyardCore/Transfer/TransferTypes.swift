@@ -94,18 +94,22 @@ public struct TransferRequest: Sendable {
     public var deleteSourceAfter: Bool
     /// Overrides the queue's conflict policy for this request (sync plans overwrite on purpose).
     public var conflictOverride: ConflictPolicy?
+    /// Files only: start now even when the queue is paused or busy, and never retry from the list. For transfers
+    /// someone is waiting on (edit in place), whose owner handles failures itself.
+    public var immediate: Bool
 
     public init(
         source: TransferEndpoint, sourcePath: String, destination: TransferEndpoint, destinationPath: String,
         isDirectory: Bool = false, size: UInt64? = nil, modified: Date? = nil,
         createParents: Bool = false, recursive: Bool = true, deleteSourceAfter: Bool = false,
-        conflictOverride: ConflictPolicy? = nil
+        conflictOverride: ConflictPolicy? = nil, immediate: Bool = false
     ) {
         self.source = source; self.sourcePath = sourcePath
         self.destination = destination; self.destinationPath = destinationPath
         self.isDirectory = isDirectory; self.size = size; self.modified = modified
         self.createParents = createParents; self.recursive = recursive; self.deleteSourceAfter = deleteSourceAfter
         self.conflictOverride = conflictOverride
+        self.immediate = immediate && !isDirectory
     }
 
     public var route: String { "\(source.label) → \(destination.label)" }
@@ -266,6 +270,8 @@ public struct TransferJobInfo: Sendable, Equatable, Identifiable {
     public var finishedChildCount: Int
     /// The next run will resume a partial file.
     public var willResume: Bool
+    /// False for immediate jobs: their owner retries them, not the Transfers list.
+    public var canRetry: Bool
 
     /// 0...1, or nil when the size is unknown.
     public var fraction: Double? {

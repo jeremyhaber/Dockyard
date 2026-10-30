@@ -64,6 +64,51 @@ import ConnectionKit
         await e.coordinator.stopAll(force: true)
     }
 
+    @Test func queuedTransfersShowInTheQueue() async throws {
+        let root = try makeTempDir("edit"); defer { try? FileManager.default.removeItem(at: root) }
+        let clock = ManualClock()
+        let server = FakeFileSystem()
+        server.put("/www/index.php", "<?php echo 1;", modified: t0)
+        let queue = TransferQueue(conflictPolicy: .ask, tempDirectory: root.appendingPathComponent("relay"),
+                                  progressInterval: 0.005, publishInterval: 0.005)
+        let coordinator = EditInPlaceCoordinator(watcher: PollingFileWatcher(clock: clock, interval: 1), rootDirectory: root, queue: queue)
+        let events = await coordinator.events()
+        let s = try await coordinator.open(fs: server, remotePath: "/www/index.php", connectionId: connA, connectionName: "Prod")
+        #expect(try String(contentsOf: s.localURL, encoding: .utf8) == "<?php echo 1;")
+        let watcher = Task { await firstValue(events) { if case .uploaded = $0.kind { true } else { false } } }
+        try save(s.localURL, "<?php echo 2;", mtime: t0.addingTimeInterval(30))
+        await settle(clock)
+        _ = try #require(await watcher.value)
+        #expect(server.text("/www/index.php") == "<?php echo 2;")
+        let done = await queue.page(offset: 0, limit: 10, filter: TransferJobFilter(scope: .topLevel, states: [.completed]))
+        #expect(done.map(\.route).sorted() == ["Prod → This Mac", "This Mac → Prod"])
+        await coordinator.stopAll(force: true)
+    }
+
+    @Test func queuedUploadFailureLeavesTheListOnceAnUploadSucceeds() async throws {
+        let root = try makeTempDir("edit"); defer { try? FileManager.default.removeItem(at: root) }
+        let clock = ManualClock()
+        let server = FakeFileSystem()
+        server.put("/www/index.php", "<?php echo 1;", modified: t0)
+        let queue = TransferQueue(conflictPolicy: .ask, tempDirectory: root.appendingPathComponent("relay"),
+                                  progressInterval: 0.005, publishInterval: 0.005)
+        await queue.pause()  // edits never wait for the queue
+        let coordinator = EditInPlaceCoordinator(watcher: PollingFileWatcher(clock: clock, interval: 1), rootDirectory: root, queue: queue)
+        let events = await coordinator.events()
+        let s = try await coordinator.open(fs: server, remotePath: "/www/index.php", connectionId: connA, connectionName: "Prod")
+        server.failNext("/www/index.php", times: 1, error: RemoteError.permissionDenied("/www/index.php"))
+        let failure = Task { await firstValue(events) { if case .uploadFailed = $0.kind { true } else { false } } }
+        try save(s.localURL, "<?php echo 2;", mtime: t0.addingTimeInterval(30))
+        await settle(clock)
+        let ev = try #require(await failure.value)
+        #expect(ev.logLine?.message.contains("Permission denied") == true)
+        #expect(await queue.snapshot().failedCount == 1)
+        await coordinator.uploadNow(s.id)
+        #expect(server.text("/www/index.php") == "<?php echo 2;")
+        #expect(await queue.snapshot().failedCount == 0)
+        await coordinator.stopAll(force: true)
+    }
+
     @Test func saveTriggersUploadWithToastAndLog() async throws {
         let e = try env()
         defer { try? FileManager.default.removeItem(at: e.root) }

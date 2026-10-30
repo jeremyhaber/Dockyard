@@ -328,7 +328,7 @@ final class AppModel {
         }
         Task { [weak self] in await self?.reloadQuickHistory() }
         edits.onEvent = { [weak self] event in self?.handleEdit(event) }
-        edits.start()
+        edits.start(queue: queue)
         if !DemoMode.isEnabled { scratch.start() }
     }
 
