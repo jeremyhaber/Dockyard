@@ -16,6 +16,8 @@ struct SFTPOpenFlags: OptionSet {
     static let write = SFTPOpenFlags(rawValue: 0x02)
     static let create = SFTPOpenFlags(rawValue: 0x08)
     static let truncate = SFTPOpenFlags(rawValue: 0x10)
+    /// With `create`: fail if the file already exists.
+    static let exclusive = SFTPOpenFlags(rawValue: 0x20)
 }
 
 struct SFTPAttributes: Sendable, Equatable {

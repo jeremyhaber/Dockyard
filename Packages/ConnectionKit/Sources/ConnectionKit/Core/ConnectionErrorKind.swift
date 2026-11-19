@@ -41,7 +41,7 @@ public enum ConnectionErrorClassifier {
             return code == 530 ? .authenticationFailed : .other
         case .protocolError(let message):
             return classify(message: message)
-        case .notConnected, .notFound, .permissionDenied, .unsupported, .invalidConfiguration:
+        case .notConnected, .notFound, .alreadyExists, .permissionDenied, .unsupported, .invalidConfiguration:
             return .other
         }
     }

@@ -396,6 +396,22 @@ public actor SFTPFileSystem: RemoteFileSystem, RemoteCommandRunner {
         do { try await sftp.run { try $0.mkdir(path) } } catch { throw map(error, path: path) }
     }
 
+    /// Exclusive create, so an existing file is never truncated.
+    public func createFile(_ path: String) async throws {
+        let sftp = try await client()
+        hub.emit(.status, "create \(path)")
+        do {
+            try await sftp.run { client in
+                let handle = try client.open(path, [.write, .create, .exclusive])
+                try client.closeHandle(handle)
+            }
+        } catch {
+            // OpenSSH answers an exclusive create on a taken name with a bare SSH_FX_FAILURE ("Failure").
+            if error is SFTPStatusError, (try? await stat(path)) != nil { throw RemoteError.alreadyExists(path) }
+            throw map(error, path: path)
+        }
+    }
+
     public func rename(_ from: String, _ to: String) async throws {
         let sftp = try await client()
         hub.emit(.status, "rename \(from) -> \(to)")

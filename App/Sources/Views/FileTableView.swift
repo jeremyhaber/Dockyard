@@ -555,14 +555,16 @@ final class FileTableCoordinator: NSObject, NSTableViewDataSource, NSTableViewDe
             }
         }
         menu.addItem(.separator())
-        // A full folder may have no empty space to right-click, so New Folder is here too (it goes in the current folder).
+        // A full folder may have no empty space to right-click, so New Folder and New File are here too (they go in the current folder).
         add("New Folder\u{2026}", #selector(menuNewFolder))
+        add("New File\u{2026}", #selector(menuNewFile))
         add("Refresh", #selector(menuRefresh))
     }
 
     /// The menu for the current folder, from a right-click on empty space.
     private func folderMenu(_ menu: NSMenu, add: (String, Selector) -> Void, server: Bool) {
         add("New Folder\u{2026}", #selector(menuNewFolder))
+        add("New File\u{2026}", #selector(menuNewFile))
         add("Refresh", #selector(menuRefresh))
         menu.addItem(.separator())
         add("Copy Path", #selector(menuCopyPath))
@@ -686,6 +688,13 @@ final class FileTableCoordinator: NSObject, NSTableViewDataSource, NSTableViewDe
               !name.isEmpty else { return }
         let session = self.session, side = pane.side
         Task { await session.createFolder(named: name, in: side) }
+    }
+
+    @objc private func menuNewFile() {
+        guard let name = Dialogs.promptText(title: "New File", message: "Name of the new file in \(pane.currentPath)", confirm: "Create"),
+              !name.isEmpty else { return }
+        let session = self.session, side = pane.side
+        Task { await session.createFile(named: name, in: side) }
     }
 
     @objc private func menuCopyPath() {

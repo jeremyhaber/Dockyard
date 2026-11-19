@@ -259,6 +259,20 @@ final class ConnectionSession: Identifiable {
         }
     }
 
+    func createFile(named name: String, in side: PaneSide) async {
+        guard !name.contains("/"), name != ".", name != ".." else {
+            operationError = "New file: \u{201C}\(name)\u{201D} is not a valid file name (no \u{201C}/\u{201D}, and not . or ..)."
+            return
+        }
+        guard await authorize(.newFile, paths: [name], side: side) else { return }
+        await run("New file", side: side) { pane in
+            let path = RemotePath.join(pane.currentPath, name)
+            try await pane.fs.createFile(path)
+            if side == .local { self.log.append(.status, "Created local file \(path)") }
+            self.record(ChangeEntry(scope: self.scope(side), kind: .newFile, toPath: path, isDirectory: false), side: side)
+        }
+    }
+
     func rename(_ item: RemoteItem, to newName: String, in side: PaneSide) async {
         guard newName != item.name, !newName.isEmpty else { return }
         guard await authorize(.rename, paths: [item.path], side: side) else { return }

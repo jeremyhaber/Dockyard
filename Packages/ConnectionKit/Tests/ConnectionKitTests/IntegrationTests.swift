@@ -74,6 +74,14 @@ func exercise(_ fs: any RemoteFileSystem, supportsPermissions: Bool = true, miss
     try await fs.mkdir(base)
     #expect(try await fs.exists(base), sourceLocation: sourceLocation)
 
+    // create an empty file; creating it again must fail and leave it alone
+    let emptyFile = RemotePath.join(base, "new file.txt")
+    try await fs.createFile(emptyFile)
+    #expect(try await fs.stat(emptyFile)?.size == 0, sourceLocation: sourceLocation)
+    await #expect(throws: (any Error).self, sourceLocation: sourceLocation) { try await fs.createFile(emptyFile) }
+    #expect(try await fs.exists(emptyFile), sourceLocation: sourceLocation)
+    try await fs.delete(emptyFile, recursive: false)
+
     let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("dockyard-it-\(UUID().uuidString)")
     try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: tmp) }

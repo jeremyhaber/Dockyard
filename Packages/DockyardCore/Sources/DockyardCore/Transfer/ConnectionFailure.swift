@@ -38,7 +38,7 @@ public enum ConnectionFailureClassifier {
             return phase == .working && looksLikeDroppedConnection(message) ? .sessionLost : .other
         case .authenticationFailed(let message):
             return RemoteError.looksLikeConnectionLimit(message) ? .refused : .other
-        case .notFound, .unsupported, .invalidConfiguration, .hostKeyRejected:
+        case .notFound, .alreadyExists, .unsupported, .invalidConfiguration, .hostKeyRejected:
             return .other
         }
     }
