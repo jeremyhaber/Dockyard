@@ -2,7 +2,7 @@ import Foundation
 
 public enum OperationKind: String, Sendable, Hashable, CaseIterable {
     case download
-    case upload, overwrite, delete, rename, move, mkdir, chmod, extract, compress
+    case upload, overwrite, delete, rename, move, mkdir, newFile, chmod, extract, compress
 
     /// Changes something on the server.
     public var writes: Bool { self != .download }
@@ -19,6 +19,7 @@ public enum OperationKind: String, Sendable, Hashable, CaseIterable {
         case .rename: "rename"
         case .move: "move"
         case .mkdir: "create a folder in"
+        case .newFile: "create a file in"
         case .chmod: "change permissions on"
         case .extract: "extract an archive into"
         case .compress: "compress files on"

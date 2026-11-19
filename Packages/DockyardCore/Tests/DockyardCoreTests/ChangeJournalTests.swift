@@ -94,6 +94,48 @@ import Testing
         #expect(fs.hasDir("/made"))
     }
 
+    @Test func undoOfNewFileOnlyWhenStillEmpty() async throws {
+        let fs = FakeFileSystem()
+        fs.makeDir("/www")
+        try await fs.createFile("/www/new.html")
+        #expect(fs.text("/www/new.html") == "")
+        let entry = ChangeEntry(scope: scope, kind: .newFile, toPath: "/www/new.html", isDirectory: false)
+        let undoer = ChangeUndoer(fs: fs)
+        #expect(await undoer.check(entry) == nil)
+        fs.put("/www/new.html", "<p>written since</p>")
+        #expect(await undoer.check(entry) == .changedSince("/www/new.html"))
+        fs.put("/www/new.html", "")
+        try await undoer.undo(entry)
+        #expect(fs.text("/www/new.html") == nil)
+        try await undoer.redo(entry)
+        #expect(fs.text("/www/new.html") == "")
+    }
+
+    /// Redo of a create onto a taken path must refuse, never offer Replace: Replace used to delete what was
+    /// there (recursively) and then fail to rename the created item back, since a create has none.
+    @Test func redoOfACreateNeverReplacesWhatIsThere() async throws {
+        let fs = FakeFileSystem()
+        fs.makeDir("/taken")
+        fs.put("/taken/keep.txt", "precious")
+        fs.put("/new.txt", "someone else's")
+        let undoer = ChangeUndoer(fs: fs)
+        for entry in [ChangeEntry(scope: scope, kind: .newFolder, toPath: "/taken", isDirectory: true),
+                      ChangeEntry(scope: scope, kind: .newFile, toPath: "/new.txt", isDirectory: false)] {
+            let block = try #require(await undoer.check(entry, redo: true))
+            #expect(!block.isConflict)
+            await #expect(throws: UndoBlockedError.self) { try await undoer.redo(entry, resolution: .overwrite) }
+        }
+        #expect(fs.text("/taken/keep.txt") == "precious")
+        #expect(fs.text("/new.txt") == "someone else's")
+    }
+
+    @Test func createFileRefusesAnExistingItem() async throws {
+        let fs = FakeFileSystem()
+        fs.put("/keep.txt", "precious")
+        await #expect(throws: RemoteError.alreadyExists("/keep.txt")) { try await fs.createFile("/keep.txt") }
+        #expect(fs.text("/keep.txt") == "precious")
+    }
+
     @Test func titlesAndSummaries() {
         let move = ChangeEntry(scope: scope, kind: .move, fromPath: "/a/images", toPath: "/old-site/images")
         #expect(move.title == "Move \u{201C}images\u{201D}")

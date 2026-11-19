@@ -176,7 +176,7 @@ struct RecentChangesPopover: View {
         switch e.kind {
         case .move, .rename, .overwrite: "\(e.fromPath ?? "") \u{2192} \(e.toPath)"
         case .chmod: "\(e.toPath): \(FileDisplay.octal(e.previousMode)) \u{2192} \(FileDisplay.octal(e.newMode))"
-        case .newFolder, .upload: e.toPath
+        case .newFolder, .newFile, .upload: e.toPath
         }
     }
 

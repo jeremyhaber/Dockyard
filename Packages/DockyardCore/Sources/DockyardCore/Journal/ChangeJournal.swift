@@ -5,6 +5,8 @@ import ConnectionKit
 /// What a journal entry did. See HANDOFF section 11, "Undo and recent changes".
 public enum ChangeKind: String, Sendable, Codable, CaseIterable {
     case move, rename, newFolder, chmod
+    /// An empty file created on the server from the file menu.
+    case newFile
     /// An upload or copy that created a new file.
     case upload
     /// An overwrite where a version was kept: `fromPath` is the kept copy, `toPath` the file.
@@ -50,6 +52,7 @@ public struct ChangeEntry: Sendable, Equatable, Identifiable {
         case .move: "Move \u{201C}\(itemName)\u{201D}"
         case .rename: "Rename \u{201C}\(RemotePath.lastComponent(of: fromPath ?? toPath))\u{201D}"
         case .newFolder: "New folder \u{201C}\(itemName)\u{201D}"
+        case .newFile: "New file \u{201C}\(itemName)\u{201D}"
         case .chmod: "Permissions of \u{201C}\(itemName)\u{201D}"
         case .upload: "Upload \u{201C}\(itemName)\u{201D}"
         case .overwrite: "Overwrite \u{201C}\(itemName)\u{201D}"
@@ -62,6 +65,7 @@ public struct ChangeEntry: Sendable, Equatable, Identifiable {
         case .move: "Moved \u{201C}\(itemName)\u{201D} into \u{201C}\(RemotePath.lastComponent(of: RemotePath.parent(of: toPath)))\u{201D}"
         case .rename: "Renamed \u{201C}\(RemotePath.lastComponent(of: fromPath ?? toPath))\u{201D} to \u{201C}\(itemName)\u{201D}"
         case .newFolder: "Created folder \u{201C}\(itemName)\u{201D}"
+        case .newFile: "Created file \u{201C}\(itemName)\u{201D}"
         case .chmod: "Changed permissions of \u{201C}\(itemName)\u{201D} to \(FileDisplay.octal(newMode))"
         case .upload: "Copied \u{201C}\(itemName)\u{201D}"
         case .overwrite: "Replaced \u{201C}\(itemName)\u{201D}"
@@ -261,10 +265,15 @@ public struct ChangeUndoer: Sendable {
             if try await fs.stat(target) != nil { return .pathOccupied(target) }
             return nil
         case .newFolder:
-            if redo { return try await fs.stat(e.toPath) == nil ? nil : .pathOccupied(e.toPath) }
+            if redo { return try await fs.stat(e.toPath) == nil ? nil : Self.createTargetTaken(e.toPath) }
             guard let item = try await fs.stat(e.toPath) else { return .itemMissing(e.toPath) }
             guard item.isDirectory else { return .changedSince(e.toPath) }
             return try await fs.list(e.toPath).isEmpty ? nil : .folderNotEmpty(e.toPath)
+        case .newFile:
+            if redo { return try await fs.stat(e.toPath) == nil ? nil : Self.createTargetTaken(e.toPath) }
+            guard let item = try await fs.stat(e.toPath) else { return .itemMissing(e.toPath) }
+            guard !item.isDirectory else { return .changedSince(e.toPath) }
+            return (item.size ?? 0) == 0 ? nil : .changedSince(e.toPath)
         case .chmod:
             guard try await fs.stat(e.toPath) != nil else { return .itemMissing(e.toPath) }
             return nil
@@ -280,6 +289,12 @@ public struct ChangeUndoer: Sendable {
         }
     }
 
+    /// Redoing a create onto a taken path is refused outright, never offered Replace/Keep Both: `resolve`
+    /// renames the item back, and a create has no item to rename, so Replace would only delete what is there.
+    private static func createTargetTaken(_ path: String) -> UndoBlock {
+        .notRedoable(UndoBlock.pathOccupied(path).message)
+    }
+
     private func unchanged(_ item: RemoteItem, _ e: ChangeEntry) -> Bool {
         if let size = e.createdSize, item.size != size { return false }
         if let when = e.createdModified, let now = item.modified, abs(now.timeIntervalSince(when)) > timeTolerance { return false }
@@ -288,7 +303,7 @@ public struct ChangeUndoer: Sendable {
 
     private func perform(_ e: ChangeEntry, redo: Bool, resolution: UndoResolution?) async throws {
         if let block = try await validate(e, redo: redo) {
-            guard block.isConflict, let resolution else { throw UndoBlockedError(block: block) }
+            guard block.isConflict, let resolution, e.kind == .move || e.kind == .rename else { throw UndoBlockedError(block: block) }
             try await resolve(e, redo: redo, resolution: resolution)
             return
         }
@@ -298,6 +313,8 @@ public struct ChangeUndoer: Sendable {
             try await fs.rename(source, target)
         case .newFolder:
             if redo { try await fs.mkdir(e.toPath) } else { try await fs.delete(e.toPath, recursive: false) }
+        case .newFile:
+            if redo { try await fs.createFile(e.toPath) } else { try await fs.delete(e.toPath, recursive: false) }
         case .chmod:
             if let mode = redo ? e.newMode : e.previousMode { try await fs.chmod(e.toPath, mode: mode) }
         case .upload:

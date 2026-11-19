@@ -116,6 +116,18 @@ final class DemoFileSystem: RemoteFileSystem {
         }
     }
 
+    /// `upload` is a no-op here, so the default (upload an empty file) would report success and show nothing.
+    func createFile(_ path: String) async throws {
+        let parent = RemotePath.parent(of: path), name = RemotePath.lastComponent(of: path)
+        let taken = state.withLock { s in
+            if s.folders[parent, default: []].contains(where: { $0.name == name }) { return true }
+            s.folders[parent, default: []].append(
+                RemoteItem(name: name, path: path, isDirectory: false, size: 0, modified: DemoMode.anchor, permissions: 0o644))
+            return false
+        }
+        if taken { throw RemoteError.alreadyExists(path) }
+    }
+
     func rename(_ from: String, _ to: String) async throws {}
     func delete(_ path: String, recursive: Bool) async throws {}
     func chmod(_ path: String, mode: UInt16) async throws {}

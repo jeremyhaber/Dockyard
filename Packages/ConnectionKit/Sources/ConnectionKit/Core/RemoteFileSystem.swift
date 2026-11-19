@@ -11,6 +11,8 @@ public protocol RemoteFileSystem: Sendable {
     /// Resumes from the size of an existing partial remote file when `resume` is true.
     func upload(_ local: URL, to remote: String, progress: Progress, resume: Bool) async throws
     func mkdir(_ path: String) async throws
+    /// Creates an empty file. Throws `RemoteError.alreadyExists` rather than touching an existing item.
+    func createFile(_ path: String) async throws
     func rename(_ from: String, _ to: String) async throws
     func delete(_ path: String, recursive: Bool) async throws
     /// No-op where unsupported.
@@ -88,6 +90,15 @@ extension RemoteFileSystem {
         try await upload(local, to: remote, progress: progress, resume: false)
     }
 
+    /// Uploads an empty file. Backends with a way to create exclusively (SFTP) override this.
+    public func createFile(_ path: String) async throws {
+        guard try await stat(path) == nil else { throw RemoteError.alreadyExists(path) }
+        let empty = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try Data().write(to: empty)
+        defer { try? FileManager.default.removeItem(at: empty) }
+        try await upload(empty, to: path, progress: Progress(totalUnitCount: 0), resume: false)
+    }
+
     public func stat(_ path: String) async throws -> RemoteItem? {
         guard path != "/" else { return RemoteItem(name: "/", path: "/", isDirectory: true) }
         let name = RemotePath.lastComponent(of: path)
@@ -103,6 +114,7 @@ public enum RemoteError: Error, Equatable, CustomStringConvertible {
     case notConnected
     case authenticationFailed(String)
     case notFound(String)
+    case alreadyExists(String)
     case permissionDenied(String)
     case protocolError(String)
     case serverRejected(code: Int, message: String)
@@ -118,6 +130,7 @@ public enum RemoteError: Error, Equatable, CustomStringConvertible {
         case .notConnected: "Not connected"
         case .authenticationFailed(let m): "Authentication failed: \(m)"
         case .notFound(let m): "Not found: \(m)"
+        case .alreadyExists(let m): "Already exists: \(m)"
         case .permissionDenied(let m): "Permission denied: \(m)"
         case .protocolError(let m): "Protocol error: \(m)"
         case .serverRejected(let code, let m): "Server replied \(code) \(m)"
