@@ -79,6 +79,14 @@ struct AppCommands: Commands {
         return session.pane(model.focusedSide) ?? session.server
     }
 
+    /// ⌘F (typing in a list does the same) searches the folder tree when it has focus and the file list otherwise;
+    /// pressed in the find bar itself it keeps the bar's scope.
+    private func openFind() {
+        let responder = NSApp.keyWindow?.firstResponder
+        let scope: PaneModel.FindScope? = responder is TreeOutlineView ? .folders : responder is FileNSTableView ? .files : nil
+        pane?.openFind(scope: scope ?? (pane?.findOpen == true ? nil : .files))
+    }
+
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
             Button("New Connection\u{2026}") { model.editConnection(nil, origin: .main) }
@@ -137,11 +145,20 @@ struct AppCommands: Commands {
             Divider()
             Button("Jump to Site or Folder\u{2026}") { model.jumpVisible = true }
                 .keyboardShortcut("k")
-            Button("Find in Server Folder\u{2026}") { model.openSearch() }
+            Button("Find\u{2026}") { openFind() }
                 .keyboardShortcut("f")
+                .disabled(pane == nil)
+            Button("Find Next") { pane?.findStep(forward: true) }
+                .disabled(!(pane?.findOpen ?? false))
+            Button("Find Previous") { pane?.findStep(forward: false) }
+                .disabled(!(pane?.findOpen ?? false))
+            Button("Find in Server Folder\u{2026}") { model.openSearch() }
+                .keyboardShortcut("f", modifiers: [.command, .option])
                 .disabled(model.activeSession?.server == nil)
             Button("Versions of Deleted and Replaced Files\u{2026}") { if let s = model.activeSession { model.showVersions(for: s) } }
                 .disabled(model.activeSession?.status.isConnected != true)
+            Button("Edit Cron Jobs\u{2026}") { if let s = model.activeSession { model.openCronEditor(for: s) } }
+                .disabled(model.activeSession.map { !model.canEditCron($0) } ?? true)
         }
 
         CommandGroup(after: .toolbar) {
@@ -169,6 +186,11 @@ struct AppCommands: Commands {
                 .keyboardShortcut("l", modifiers: [.command, .shift])
             Button("Toggle Terminal") { model.toggleDrawer(tab: .terminal) }
                 .keyboardShortcut("`", modifiers: .control)
+            Button("New Shell") { model.newShell() }
+                .keyboardShortcut("`", modifiers: [.control, .shift])
+                .disabled(model.activeSession?.shellAvailable != true)
+            Button("Close Shell") { model.closeActiveShell() }
+                .disabled(model.activeSession?.shellAvailable != true || !(model.drawerVisible && model.drawerTab == .terminal))
             Button(model.drawerVisible && model.drawerTab == .scratch ? "Hide Scratch" : "Show Scratch") { model.toggleDrawer(tab: .scratch) }
         }
 

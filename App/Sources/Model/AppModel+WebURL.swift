@@ -65,6 +65,16 @@ extension AppModel {
         }
     }
 
+    /// Shell folder deletes failed on this site (no shell, or a shell that sees other files): stop trying them
+    /// until the user turns the setting back on in the site editor.
+    func turnOffShellFolderDelete(_ connectionId: UUID, name: String) {
+        Task {
+            guard (try? await connections.connection(id: connectionId))??.shellFolderDelete == true else { return }
+            do { try await connections.update(connectionId) { $0.shellFolderDelete = false } } catch { return }
+            showToast("\(name) can't delete folders with SSH commands, so folders are deleted over SFTP. You can turn it back on in the site editor.", symbol: "info.circle")
+        }
+    }
+
     func removeWebURL(at path: String, on connectionId: UUID) {
         Task { try? await connections.update(connectionId) { $0.webURLs.removeAll { $0.path == path } } }
     }

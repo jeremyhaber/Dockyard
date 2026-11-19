@@ -16,12 +16,22 @@ public protocol RemoteCommandRunner: Sendable {
     /// root through the connection's `su`/`sudo` setting, when one is configured.
     func execStream(_ command: String, elevated: Bool) async throws -> AsyncThrowingStream<SSHExecEvent, Error>
 
+    /// Like `execStream(_:elevated:)`, with `stdin` written to the command's standard input and then closed
+    /// (for `crontab -`, `tee` and similar). Without it the command's stdin is empty.
+    func execStream(_ command: String, elevated: Bool, stdin: Data?) async throws -> AsyncThrowingStream<SSHExecEvent, Error>
+
     /// True when an `elevated` command would really run as root (browsing as root with a configured `su`/`sudo`).
     var canElevateCommands: Bool { get async }
 }
 
 public extension RemoteCommandRunner {
     var canElevateCommands: Bool { get async { false } }
+
+    /// Default for runners that cannot feed stdin: only the no-input form works.
+    func execStream(_ command: String, elevated: Bool, stdin: Data?) async throws -> AsyncThrowingStream<SSHExecEvent, Error> {
+        guard stdin == nil else { throw RemoteError.unsupported("This connection cannot send input to a command") }
+        return try await execStream(command, elevated: elevated)
+    }
 
     func execStream(_ command: String) async throws -> AsyncThrowingStream<SSHExecEvent, Error> {
         try await execStream(command, elevated: false)

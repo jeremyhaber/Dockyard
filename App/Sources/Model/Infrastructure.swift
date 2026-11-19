@@ -96,6 +96,11 @@ enum FileSystemFactory {
         case .sftp:
             var options = SFTPFileSystem.Options(browseAsRoot: browseAsRoot && connection.elevation != .none)
             options.jumpHosts = jumpHops
+            options.shellFolderDelete = connection.shellFolderDelete
+            let id = connection.id, name = connection.name
+            options.onShellFolderDeleteUnavailable = {
+                Task { @MainActor in AppModel.shared.turnOffShellFolderDelete(id, name: name) }
+            }
             return SFTPFileSystem(config: connection.config, secrets: secrets, hostKeyValidator: hostKeyValidator, options: options)
         case .ftp, .ftps:
             return FTPFileSystem(config: connection.config, secrets: secrets)

@@ -22,12 +22,31 @@ final class PaneModel {
     private(set) var rowsVersion = 0
     private(set) var treeVersion = 0
     private(set) var isLoading = false
+    /// True while the list shows a listing that is still arriving.
+    private(set) var isPartial = false
+    /// Folders being listed right now (the current folder or one expanding in the tree), for the tree's spinner.
+    private(set) var loadingPaths: Set<String> = []
     private(set) var errorMessage: String?
     private(set) var showHidden = true
     /// Bumped by ⌘L / ⌘G and ⌘Y so the path bar reacts.
     private(set) var pathEditToken = 0
     private(set) var historyToken = 0
     private(set) var recentToken = 0
+    // The find bar (⌘F): highlights matching names and steps through them, like a browser's find.
+    private(set) var findOpen = false
+    /// Kept after closing, like a browser, so ⌘F brings the last search back.
+    private(set) var findText = ""
+    private(set) var findScope: FindScope = .files
+    /// Matching list row ids (files) or tree paths (folders), in display order.
+    private(set) var findMatches: [String] = []
+    /// Index into `findMatches`; nil until the user moves to a match.
+    private(set) var findIndex: Int?
+    /// Bumped to focus the find field.
+    private(set) var findFocusToken = 0
+    /// With the focus: put the caret after the text (typing carries on) rather than selecting it all (⌘F).
+    private(set) var findCaretAtEnd = false
+    /// Bumped when the current match moves, so the list selects or the tree scrolls to it.
+    private(set) var findMoveToken = 0
 
     @ObservationIgnored var selection: [FileRow] = []
     @ObservationIgnored var onStateChange: (() -> Void)?
@@ -35,6 +54,7 @@ final class PaneModel {
     @ObservationIgnored var onLog: ((LogLine.Kind, String) -> Void)?
 
     @ObservationIgnored private var cache: [String: [RemoteItem]] = [:]
+    @ObservationIgnored private var loadingCounts: [String: Int] = [:]
     @ObservationIgnored private var loadGeneration = 0
     @ObservationIgnored private var rowGeneration = 0
     @ObservationIgnored private var loadTask: Task<Void, Never>?
@@ -52,7 +72,10 @@ final class PaneModel {
 
     var currentPath: String { state.currentPath }
     var treeRows: [TreeRow] { tree.visibleRows(for: state) }
-    var footer: String { FileListModel.footer(for: items) }
+    var footer: String {
+        if isPartial { return "\(items.count.formatted()) items so far" }
+        return FileListModel.footer(for: items)
+    }
     var sort: FileSort { state.activeTab.sort }
     var selectedItems: [RemoteItem] {
         var out: [RemoteItem] = []
@@ -68,10 +91,11 @@ final class PaneModel {
         rebuildRows()
     }
 
-    /// Changes whenever the tree, the current folder or the tabs change.
+    /// Changes whenever the tree, the current folder, the tabs or the folder search change.
     var treeSignature: Int {
         var hasher = Hasher()
         hasher.combine(treeVersion)
+        hasher.combine(findSignature(for: .folders))
         hasher.combine(currentPath)
         hasher.combine(state.activeIndex)
         for tab in state.tabs { hasher.combine(tab.path) }
@@ -82,7 +106,38 @@ final class PaneModel {
 
     var loader: FolderTree.Loader {
         let fs = self.fs
-        return { path in try await fs.list(path) }
+        return { [weak self] path in
+            await self?.beginLoading(path)
+            do {
+                let list = try await fs.list(path)
+                await self?.endLoading(path)
+                return list
+            } catch {
+                await self?.endLoading(path)
+                throw error
+            }
+        }
+    }
+
+    /// Marks `path` as loading. The spinner appears only if the listing takes longer than a moment, so quick ones do not flicker.
+    private func beginLoading(_ path: String) {
+        loadingCounts[path, default: 0] += 1
+        guard loadingCounts[path] == 1 else { return }
+        Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(150))
+            guard let self, self.loadingCounts[path] != nil else { return }
+            self.loadingPaths.insert(path)
+        }
+    }
+
+    private func endLoading(_ path: String) {
+        guard let count = loadingCounts[path] else { return }
+        if count > 1 {
+            loadingCounts[path] = count - 1
+        } else {
+            loadingCounts[path] = nil
+            loadingPaths.remove(path)
+        }
     }
 
     // MARK: Start
@@ -108,11 +163,32 @@ final class PaneModel {
         errorMessage = nil
         loadTask?.cancel()
         let fs = self.fs
+        beginLoading(path)
+        isPartial = false
+        // A cached listing stays up until the fresh one is complete; without one, entries show as they arrive.
+        let showPartial = cache[path] == nil
         loadTask = Task { [weak self] in
+            defer { self?.endLoading(path) }
+            var listing = ListingAccumulator()
+            var lastShown: ContinuousClock.Instant?
             do {
-                let list = try await fs.list(path)
+                for try await update in fs.listStream(path) {
+                    guard let self, generation == self.loadGeneration else { return }
+                    listing.apply(update)
+                    // Re-sorting a huge folder on every batch would swamp the list; refresh a few times a second.
+                    let now = ContinuousClock.now
+                    if showPartial, lastShown.map({ now - $0 > Self.partialRefresh }) ?? true {
+                        lastShown = now
+                        self.isPartial = true
+                        self.apply(listing.items)
+                    }
+                }
+                // A cancelled stream just ends; never cache what it had so far as the full listing.
+                try Task.checkCancellation()
                 guard let self, generation == self.loadGeneration else { return }
+                let list = listing.items
                 self.cache[path] = list
+                self.isPartial = false
                 self.apply(list)
                 self.isLoading = false
                 self.syncTree(path: path, list: list)
@@ -121,6 +197,7 @@ final class PaneModel {
             } catch {
                 guard let self, generation == self.loadGeneration else { return }
                 self.isLoading = false
+                self.isPartial = false
                 self.errorMessage = "Cannot open \(path): \(error.userMessage)"
                 self.items = []
                 self.rebuildRows()
@@ -128,6 +205,8 @@ final class PaneModel {
             }
         }
     }
+
+    private static let partialRefresh: Duration = .milliseconds(300)
 
     /// Forgets cached listings (after a change made through this app).
     func invalidate() { cache.removeAll() }
@@ -148,6 +227,7 @@ final class PaneModel {
         if items.count < 1500 {
             rows = FileListModel.rows(for: items, at: path, rules: rules, sort: sort, showHidden: hidden)
             rowsVersion += 1
+            if findScope == .files { refreshFind(jump: false) }
             return
         }
         Task { [weak self] in
@@ -157,6 +237,7 @@ final class PaneModel {
             guard let self, generation == self.rowGeneration else { return }
             self.rows = built
             self.rowsVersion += 1
+            if self.findScope == .files { self.refreshFind(jump: false) }
         }
     }
 
@@ -177,7 +258,137 @@ final class PaneModel {
             await body(&copy)
             self.tree = copy
             self.treeVersion += 1
+            if self.findScope == .folders { self.refreshFind(jump: false) }
             self.onStateChange?()
+        }
+    }
+
+    // MARK: Find (⌘F)
+
+    enum FindScope: Hashable { case files, folders }
+
+    /// Opens the find bar and focuses it. `scope` nil keeps the last one.
+    func openFind(scope: FindScope? = nil) {
+        if let scope, scope != findScope { findScope = scope; findIndex = nil }
+        findOpen = true
+        findCaretAtEnd = false
+        findFocusToken += 1
+        refreshFind(jump: findIndex == nil)
+    }
+
+    /// Typing in the list or tree: starts a new find with `text` in that view and moves the typing into the bar.
+    func startFind(typing text: String, scope: FindScope) {
+        findScope = scope
+        findOpen = true
+        findIndex = nil
+        findText = text
+        findCaretAtEnd = true
+        findFocusToken += 1
+        refreshFind(jump: true)
+    }
+
+    /// Closes the bar. In the folder tree the pane goes to the current match, the way a browser leaves
+    /// the found text selected; in the list the match is already selected. `land: false` just closes.
+    func closeFind(land: Bool = true) {
+        guard findOpen else { return }
+        let landing = land && findScope == .folders ? findCurrent : nil
+        findOpen = false
+        findMatches = []
+        findIndex = nil
+        if let landing { navigate(to: landing) }
+    }
+
+    func setFindText(_ text: String) {
+        guard text != findText else { return }
+        let changed = NameFilter.normalized(text) != NameFilter.normalized(findText)
+        findText = text
+        if changed { refreshFind(jump: true) }
+    }
+
+    func setFindScope(_ scope: FindScope) {
+        guard scope != findScope else { return }
+        findScope = scope
+        findIndex = nil
+        refreshFind(jump: true)
+    }
+
+    /// Find Next / Find Previous (Return / Shift-Return in the bar), wrapping at either end.
+    func findStep(forward: Bool) {
+        guard findOpen else { return }
+        guard let next = NameFilter.step(from: findIndex, count: findMatches.count, forward: forward) else { return }
+        moveFind(to: next)
+    }
+
+    var findCurrent: String? {
+        guard let findIndex, findIndex < findMatches.count else { return nil }
+        return findMatches[findIndex]
+    }
+
+    /// "3 of 12", "12 matches", "No matches"; empty while the field is blank.
+    var findStatus: String {
+        guard !NameFilter.normalized(findText).isEmpty else { return "" }
+        if findMatches.isEmpty { return "No matches" }
+        if let findIndex { return "\((findIndex + 1).formatted()) of \(findMatches.count.formatted())" }
+        return findMatches.count == 1 ? "1 match" : "\(findMatches.count.formatted()) matches"
+    }
+
+    /// The part of `name` to highlight in the list (`.files`) or the tree (`.folders`); nil when that view is not
+    /// being searched or the name does not match.
+    func findHighlight(in name: String, for scope: FindScope) -> Range<String.Index>? {
+        guard findOpen, findScope == scope else { return nil }
+        return NameFilter.matchRange(in: name, filter: findText)
+    }
+
+    /// Changes whenever what the list (`.files`) or tree (`.folders`) shows for the search changes.
+    func findSignature(for scope: FindScope) -> Int {
+        var hasher = Hasher()
+        let active = findOpen && findScope == scope
+        hasher.combine(active)
+        if active {
+            hasher.combine(NameFilter.normalized(findText))
+            hasher.combine(findCurrent)
+            hasher.combine(findMoveToken)
+        }
+        return hasher.finalize()
+    }
+
+    /// Recomputes the matches after the text, the scope or the data changed. With `jump`, moves to the first match
+    /// at or after the list selection (files) or the first in the tree (folders), unless the current one still matches.
+    private func refreshFind(jump: Bool) {
+        guard findOpen else { return }
+        let previous = findCurrent
+        findMatches = findScope == .files ? NameFilter.matchingRows(rows, filter: findText) : tree.matchingPaths(findText)
+        if let previous, let kept = findMatches.firstIndex(of: previous) {
+            findIndex = kept
+            return
+        }
+        findIndex = nil
+        guard jump, !findMatches.isEmpty else { return }
+        moveFind(to: firstMatchFromAnchor())
+    }
+
+    private func firstMatchFromAnchor() -> Int {
+        guard findScope == .files, let anchor = selection.first?.id,
+              let anchorRow = rows.firstIndex(where: { $0.id == anchor }) else { return 0 }
+        let position = Dictionary(rows.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { first, _ in first })
+        return findMatches.firstIndex { (position[$0] ?? 0) >= anchorRow } ?? 0
+    }
+
+    private func moveFind(to index: Int) {
+        findIndex = index
+        findMoveToken += 1
+        guard findScope == .folders, let path = findCurrent else { return }
+        // Expand the match's parents so its row exists; the tree scrolls to it once it does.
+        var collapsedAbove = false
+        var parent = RemotePath.parent(of: path)
+        while parent != path, let node = tree.node(at: parent) {
+            if !node.isExpanded { collapsedAbove = true; break }
+            if parent == tree.root.path { break }
+            parent = RemotePath.parent(of: parent)
+        }
+        if collapsedAbove {
+            let load = loader
+            mutateTree { tree in await tree.reveal(path, loader: load) }
         }
     }
 

@@ -87,6 +87,7 @@ actor MountContext {
                 }
             }
             var options = SFTPFileSystem.Options()
+            options.shellFolderDelete = c.shellFolderDelete
             options.jumpHosts = jumpChain.map {
                 SSHJumpHop(config: $0.config, secrets: secrets, hostKeyValidator: trustedOnly(host: $0.host, port: $0.port))
             }

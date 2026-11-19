@@ -12,6 +12,8 @@ private final class TerminalContainerView: NSView {
     }
 }
 
+extension TerminalController: Identifiable {}
+
 struct TerminalHostView: NSViewRepresentable {
     let controller: TerminalController
 
@@ -40,6 +42,7 @@ struct TerminalPane: View {
                 if connection.isProd, connection.elevation != .none {
                     RootShellBar(session: session)
                 }
+                ShellTabStrip(session: session)
                 shell
             } else if session.status.isConnected {
                 NoShellView(connection: connection)
@@ -48,16 +51,24 @@ struct TerminalPane: View {
             }
         }
         .task(id: session.status) { startIfReady() }
+        .onChange(of: session.activeTerminal.id) { startIfReady() }
     }
 
     @ViewBuilder
     private var shell: some View {
         let controller = session.terminal()
         ZStack {
-            TerminalHostView(controller: controller)
-                .id(session.id)
-                .padding(.leading, 6)
-            if case .failed(let message) = controller.phase {
+            if let editor = controller.editor {
+                TerminalEditorView(model: editor)
+                    .id("\(session.id)-\(controller.id)-editor")
+            } else {
+                TerminalHostView(controller: controller)
+                    .id("\(session.id)-\(controller.id)")
+                    .padding(.leading, 6)
+            }
+            if controller.editor != nil {
+                EmptyView()
+            } else if case .failed(let message) = controller.phase {
                 failure(message, controller: controller)
             } else if controller.phase == .ended {
                 VStack {
@@ -74,7 +85,7 @@ struct TerminalPane: View {
 
     private func startIfReady() {
         guard session.status.isConnected, session.shellAvailable else { return }
-        let controller = session.terminal()
+        let controller = session.activeTerminal
         if controller.phase == .idle { controller.start() }
         Task { await controller.reloadSnippets(from: app.snippets) }
     }
@@ -99,6 +110,81 @@ struct TerminalPane: View {
         }
         .foregroundStyle(.white.opacity(0.6))
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+/// Slim tab strip above the terminal: one tab per shell on this connection, plus "+" for a new one.
+private struct ShellTabStrip: View {
+    let session: ConnectionSession
+
+    var body: some View {
+        let active = session.activeTerminal
+        let shells = session.terminals
+        HStack(spacing: 2) {
+            ScrollView(.horizontal) {
+                HStack(spacing: 2) {
+                    ForEach(shells) { shell in
+                        ShellTab(
+                            title: shell.title, selected: shell.id == active.id, closable: true,
+                            select: { session.selectTerminal(shell) },
+                            close: { session.closeTerminal(shell) })
+                    }
+                }
+            }
+            .scrollIndicators(.hidden)
+            Button { session.newTerminal() } label: {
+                Image(systemName: "plus").font(.system(size: 10, weight: .semibold))
+                    .frame(width: 20, height: 20)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.white.opacity(0.7))
+            .help("New Shell")
+            .accessibilityLabel("New Shell")
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 8)
+        .frame(height: 24)
+        .background(Palette.drawer)
+        .overlay(alignment: .bottom) { Divider() }
+    }
+}
+
+private struct ShellTab: View {
+    let title: String
+    let selected: Bool
+    let closable: Bool
+    let select: () -> Void
+    let close: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Button(action: select) {
+                Text(title)
+                    .font(.system(size: 11, weight: selected ? .semibold : .regular))
+                    .lineLimit(1)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            Button(action: close) {
+                Image(systemName: "xmark").font(.system(size: 8, weight: .bold))
+                    .frame(width: 14, height: 14)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .opacity(closable && (hovering || selected) ? 1 : 0)
+            .help("Close \(title)")
+            .accessibilityLabel("Close \(title)")
+        }
+        .padding(.leading, 10)
+        .padding(.trailing, 4)
+        .frame(height: 20)
+        .background(selected ? Color.white.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 5))
+        .foregroundStyle(.white.opacity(selected ? 0.95 : 0.65))
+        .onHover { hovering = $0 }
+        .accessibilityElement(children: .contain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
 

@@ -191,6 +191,7 @@ extension AppModel {
         switch event.kind {
         case .uploaded: showToast(text, symbol: "arrow.up.doc")
         case .uploadFailed: showToast(text, symbol: "exclamationmark.triangle", isError: true)
+        case .reloaded: showToast(text, symbol: "arrow.down.doc")
         default: showToast(text, symbol: "exclamationmark.circle", isError: true)
         }
     }

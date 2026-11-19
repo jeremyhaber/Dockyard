@@ -9,8 +9,17 @@ public actor SFTPFileSystem: RemoteFileSystem, RemoteCommandRunner {
         public var session = SSHSessionOptions()
         /// Hosts to tunnel through, outermost first. Each hop is an SSH connection of its own.
         public var jumpHosts: [SSHJumpHop] = []
+        /// Deletes folders with one `rm -rf` over SSH instead of removing every file over SFTP. Falls back to
+        /// SFTP when the server cannot run commands (SFTP-only accounts, Windows) or the folder is still there.
+        public var shellFolderDelete = true
+        /// Called once when shell folder deletes turn out not to work on this server (commands refused, without
+        /// effect, or seeing other files), so the app can switch the setting off for the site.
+        public var onShellFolderDeleteUnavailable: (@Sendable () -> Void)?
 
-        public init(browseAsRoot: Bool = false) { self.browseAsRoot = browseAsRoot }
+        public init(browseAsRoot: Bool = false, shellFolderDelete: Bool = true) {
+            self.browseAsRoot = browseAsRoot
+            self.shellFolderDelete = shellFolderDelete
+        }
     }
 
     public nonisolated let config: ConnectionConfig
@@ -25,6 +34,10 @@ public actor SFTPFileSystem: RemoteFileSystem, RemoteCommandRunner {
     private var shouldReconnect = false
     private var reconnecting: Task<Void, Error>?
     public private(set) var isBrowsingAsRoot = false
+    /// Set when folder deletes cannot use a shell command on this connection: the server refuses commands
+    /// (SFTP-only account), or a command could not see a file SFTP had just created (the two see different file
+    /// systems). Folder deletes then stay on SFTP until the next connect.
+    private var shellDeleteUnavailable = false
 
     public nonisolated var logStream: AsyncStream<LogLine> { hub.stream() }
     public nonisolated var supportsShell: Bool { true }
@@ -50,6 +63,7 @@ public actor SFTPFileSystem: RemoteFileSystem, RemoteCommandRunner {
 
     private func establish() async throws {
         await disconnectQuietly()
+        shellDeleteUnavailable = false
         hub.emit(.status, "Connecting to \(config.host):\(config.port)...")
         do {
             let session = try await connectSession()
@@ -213,13 +227,18 @@ public actor SFTPFileSystem: RemoteFileSystem, RemoteCommandRunner {
     /// runs as root (`canElevateCommands` says whether the file browser is root too). Cancelling the
     /// consuming task (or dropping the stream) kills the remote process group.
     public func execStream(_ command: String, elevated: Bool) async throws -> AsyncThrowingStream<SSHExecEvent, Error> {
+        try await execStream(command, elevated: elevated, stdin: nil)
+    }
+
+    /// With `stdin` the bytes are sent on the channel and closed; the command is logged, never the input.
+    public func execStream(_ command: String, elevated: Bool, stdin: Data?) async throws -> AsyncThrowingStream<SSHExecEvent, Error> {
         let ssh = try await liveSSH()
         var elevation: ShellElevation?
         if elevated, config.elevation != .none, config.runAs == nil {
             elevation = ShellElevation(kind: config.elevation, password: try await secrets.secret(for: config.id, purpose: .elevationPassword))
         }
         hub.emit(.command, elevation == nil ? command : "[\(config.elevation == .su ? "su" : "sudo")] \(command)")
-        return ssh.execStream(elevation == nil ? try asAccount(command) : command, elevation: elevation)
+        return ssh.execStream(elevation == nil ? try asAccount(command) : command, elevation: elevation, stdin: stdin)
     }
 
     public var canElevateCommands: Bool { isBrowsingAsRoot }
@@ -231,28 +250,70 @@ public actor SFTPFileSystem: RemoteFileSystem, RemoteCommandRunner {
     }
 
     public func list(_ path: String) async throws -> [RemoteItem] {
+        try await collectListing(path)
+    }
+
+    /// Sends entries as each server reply arrives. Symlinks first show as links to files; once the folder is listed
+    /// their targets are resolved in pipelined groups and sent as `.updated`.
+    public nonisolated func listStream(_ path: String) -> AsyncThrowingStream<ListingUpdate, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    try await self.streamListing(path, into: continuation)
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
+    /// Links resolved per server round trip.
+    private static let linkGroupSize = 64
+
+    private func streamListing(_ path: String, into continuation: AsyncThrowingStream<ListingUpdate, Error>.Continuation) async throws {
         let dir = path.isEmpty ? "." : path
         hub.emit(.status, "Listing directory \(dir)")
         let entries: [SFTPEntry]
-        do { entries = try await retryingOnDrop { try await $0.run { try $0.listDirectory(dir) } } } catch { throw map(error, path: dir) }
-        let sftp = try await client()
-
-        var items: [RemoteItem] = []
-        items.reserveCapacity(entries.count)
-        for entry in entries {
-            let itemPath = RemotePath.join(dir, entry.name)
-            var item = Self.item(name: entry.name, path: itemPath, attributes: entry.attributes)
-            if entry.attributes.isSymlink {
-                let resolved = try? await sftp.run { client -> (String, SFTPAttributes?) in
-                    (try client.readlink(itemPath), try? client.stat(itemPath, followLinks: true))
+        do {
+            entries = try await retryingOnDrop { sftp in
+                try await sftp.run { client in
+                    try client.listDirectory(dir) { batch in
+                        continuation.yield(.added(batch.map { Self.listedItem($0, in: dir) }))
+                    }
                 }
-                item.symlinkTarget = resolved?.0 ?? ""
-                item.isDirectory = resolved?.1?.isDirectory ?? false
             }
-            items.append(item)
+        } catch {
+            throw map(error, path: dir)
         }
-        hub.emit(.status, "Directory listing of \(dir) successful (\(items.count) items)")
-        return items
+        hub.emit(.status, "Directory listing of \(dir) successful (\(entries.count) items)")
+
+        let links = entries.filter(\.attributes.isSymlink).map { Self.listedItem($0, in: dir) }
+        guard !links.isEmpty else { return }
+        let sftp = try await client()
+        var start = 0
+        while start < links.count {
+            try Task.checkCancellation()
+            let group = Array(links[start..<min(start + Self.linkGroupSize, links.count)])
+            start += group.count
+            let paths = group.map(\.path)
+            // A failure here leaves the remaining links unresolved rather than failing a listing already shown.
+            guard let resolved = try? await sftp.run({ try $0.resolveLinks(paths) }) else { return }
+            continuation.yield(.updated(zip(group, resolved).map { item, link in
+                var item = item
+                item.symlinkTarget = link.target ?? ""
+                item.isDirectory = link.attributes?.isDirectory ?? false
+                return item
+            }))
+        }
+    }
+
+    /// An entry as first listed. A symlink is marked as one, with its target filled in later.
+    private static func listedItem(_ entry: SFTPEntry, in dir: String) -> RemoteItem {
+        var item = item(name: entry.name, path: RemotePath.join(dir, entry.name), attributes: entry.attributes)
+        if entry.attributes.isSymlink { item.symlinkTarget = "" }
+        return item
     }
 
     public func stat(_ path: String) async throws -> RemoteItem? {
@@ -343,22 +404,110 @@ public actor SFTPFileSystem: RemoteFileSystem, RemoteCommandRunner {
 
     public func delete(_ path: String, recursive: Bool) async throws {
         let sftp = try await client()
-        hub.emit(.status, "rm\(recursive ? " -r" : "") \(path)")
-        do { try await remove(path, recursive: recursive, on: sftp) } catch { throw map(error, path: path) }
+        hub.emit(.status, "Deleting \(path)...")
+        do {
+            let removed = try await remove(path, recursive: recursive, on: sftp)
+            hub.emit(.status, removed.viaShell ? "Deleted \(path) with rm -rf" : "Deleted \(path) (\(removed.count) \(removed.count == 1 ? "item" : "items"))")
+        } catch { throw map(error, path: path) }
     }
 
-    /// Uses lstat semantics so symlinks are removed, never followed.
-    private func remove(_ path: String, recursive: Bool, on sftp: SFTPClient) async throws {
+    /// Uses lstat semantics so symlinks are removed, never followed. Each item removed over SFTP is logged.
+    private func remove(_ path: String, recursive: Bool, on sftp: SFTPClient, topLevel: Bool = true) async throws -> (count: Int, viaShell: Bool) {
         let attributes = try await sftp.run { try $0.stat(path, followLinks: false) }
+        if attributes.isDirectory, recursive, topLevel, options.shellFolderDelete, await removeWithShell(path, on: sftp) {
+            return (0, true)
+        }
+        var count = 0
         if attributes.isDirectory {
             if recursive {
                 for child in try await sftp.run({ try $0.listDirectory(path) }) {
-                    try await remove(RemotePath.join(path, child.name), recursive: true, on: sftp)
+                    count += try await remove(RemotePath.join(path, child.name), recursive: true, on: sftp, topLevel: false).count
                 }
             }
+            hub.emit(.command, "rmdir \(path)")
             try await sftp.run { try $0.rmdir(path) }
         } else {
+            hub.emit(.command, "rm \(path)")
             try await sftp.run { try $0.remove(path) }
+        }
+        return (count + 1, false)
+    }
+
+    /// Stops shell folder deletes for this connection and tells the app, which turns the site setting off.
+    private func giveUpShellDelete(_ level: LogLine.Kind, _ message: String) {
+        shellDeleteUnavailable = true
+        hub.emit(level, message + "; deleting folders over SFTP and turning off shell deletes for this site")
+        options.onShellFolderDeleteUnavailable?()
+    }
+
+    /// Exit status of the delete command when the shell cannot see the canary file.
+    static let canaryMissingStatus: Int32 = 97
+
+    /// One `rm -rf` over SSH, as the same user the file browser works as. True only when the folder is gone
+    /// afterwards; any failure (no shell, ForceCommand internal-sftp, permission denied partway) returns false
+    /// so the caller removes what is left over SFTP and reports the precise error.
+    ///
+    /// A canary file created over SFTP inside the folder must be visible to the shell at the same path, or
+    /// nothing is deleted: this catches a shell that sees a different file system than SFTP does.
+    private func removeWithShell(_ path: String, on sftp: SFTPClient) async -> Bool {
+        guard !shellDeleteUnavailable else { return false }
+        // Relative paths could resolve differently in a shell, and "/" (or anything with "..") is never worth the risk.
+        let components = path.split(separator: "/").filter { $0 != "." }
+        guard path.hasPrefix("/"), !components.isEmpty, !components.contains("..") else { return false }
+        let canary = RemotePath.join(path, ".dockyard-rm-\(UUID().uuidString)")
+        do {
+            try await sftp.run { client in try client.closeHandle(try client.open(canary, [.write, .create, .truncate])) }
+        } catch {
+            // Without write access to the folder, rm -rf could not empty it either.
+            return false
+        }
+        let command = "test -f \(ShellQuote.quote(canary)) || exit \(Self.canaryMissingStatus); rm -rf -- \(ShellQuote.quote(path))"
+        let status: Int32?
+        let stderr: Data
+        do {
+            if isBrowsingAsRoot {
+                // The SFTP server runs as root, so the command must too.
+                var exit: Int32?, errors = Data()
+                for try await event in try await execStream(command, elevated: true) {
+                    switch event {
+                    case .exit(let code): exit = code
+                    case .stderr(let data): errors.append(data)
+                    case .stdout: break
+                    }
+                }
+                (status, stderr) = (exit, errors)
+            } else {
+                let result = try await exec(command)
+                (status, stderr) = (result.exitStatus, result.stderr)
+            }
+        } catch {
+            // Nothing ran: the server would not start the command. Not worth retrying on this connection.
+            giveUpShellDelete(.warning, "This server does not run SSH commands for this account (\(error))")
+            try? await sftp.run { try $0.remove(canary) }
+            return false
+        }
+        if status == Self.canaryMissingStatus {
+            giveUpShellDelete(.warning, "SSH commands see different files than SFTP on this server")
+            try? await sftp.run { try $0.remove(canary) }
+            return false
+        }
+        // rm -rf always takes the canary with it (it sits at the top, where we could write), even when something
+        // deeper is protected. Still there means the command never ran, whatever its exit status: an SFTP-only
+        // account (ForceCommand internal-sftp) starts sftp-server for any command.
+        if (try? await sftp.run({ try $0.stat(canary, followLinks: false) })) != nil {
+            giveUpShellDelete(.warning, "SSH commands have no effect for this account")
+            try? await sftp.run { try $0.remove(canary) }
+            return false
+        }
+        do {
+            _ = try await sftp.run { try $0.stat(path, followLinks: false) }
+            let message = String(decoding: stderr, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+            hub.emit(.warning, "rm -rf left \(path) in place (exit \(status.map(String.init) ?? "unknown"))\(message.isEmpty ? "" : ": \(message)"); deleting the rest over SFTP")
+            return false
+        } catch let error as SFTPStatusError where error.known == .noSuchFile {
+            return true
+        } catch {
+            return false
         }
     }
 

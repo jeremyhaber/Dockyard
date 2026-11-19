@@ -170,9 +170,13 @@ private enum Column: String, CaseIterable {
 
 /// Name with a status icon and a second line (the error text for failed rows).
 private final class NameCell: NSTableCellView {
-    let icon = NSImageView()
-    let title = NSTextField(labelWithString: "")
-    let detail = NSTextField(labelWithString: "")
+    override var backgroundStyle: NSView.BackgroundStyle {
+        didSet { applySelectionInk(emphasized: backgroundStyle == .emphasized) }
+    }
+
+    let icon = InkImageView()
+    let title = InkLabel(labelWithString: "")
+    let detail = InkLabel(labelWithString: "")
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -201,8 +205,12 @@ private final class NameCell: NSTableCellView {
 }
 
 private final class ProgressCell: NSTableCellView {
+    override var backgroundStyle: NSView.BackgroundStyle {
+        didSet { applySelectionInk(emphasized: backgroundStyle == .emphasized) }
+    }
+
     let bar = NSProgressIndicator()
-    let label = NSTextField(labelWithString: "")
+    let label = InkLabel(labelWithString: "")
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -230,7 +238,11 @@ private final class ProgressCell: NSTableCellView {
 }
 
 private final class TextCell: NSTableCellView {
-    let label = NSTextField(labelWithString: "")
+    override var backgroundStyle: NSView.BackgroundStyle {
+        didSet { applySelectionInk(emphasized: backgroundStyle == .emphasized) }
+    }
+
+    let label = InkLabel(labelWithString: "")
 
     override init(frame: NSRect) {
         super.init(frame: frame)

@@ -181,7 +181,7 @@ struct OnePasswordPickerSheet: View {
                 List(fields, id: \.id, selection: $field) { field in
                     HStack {
                         Image(systemName: field.isSecret ? "lock.fill" : "text.alignleft")
-                            .foregroundStyle(Palette.textSecondary).frame(width: 16).accessibilityHidden(true)
+                            .foregroundStyle(.secondary).frame(width: 16).accessibilityHidden(true)
                         Text(field.label.isEmpty ? field.id : field.label).lineLimit(1)
                     }
                 }

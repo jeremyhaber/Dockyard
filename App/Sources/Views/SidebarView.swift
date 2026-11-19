@@ -47,22 +47,37 @@ struct SidebarView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.openWindow) private var openWindow
     var compact = false
+    @State private var query = ""
+    @FocusState private var searchFocused: Bool
+
+    private static let matchLimit = 50
+
+    private var searching: Bool { !compact && !NameFilter.normalized(query).isEmpty }
+
+    private var matches: [Connection] {
+        NameFilter.connections(app.allConnections, matching: query, clientNames: app.clientNames, limit: Self.matchLimit)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: compact ? .center : .leading, spacing: compact ? 8 : 14) {
-                    let open = openConnections
-                    let openIDs = Set(open.map(\.id))
-                    let favorites = app.favorites.filter { !openIDs.contains($0.id) }
-                    section("Open now", connections: open, empty: "Nothing open")
-                    section("Favorites", connections: favorites, empty: app.favorites.isEmpty ? "Star a connection to pin it here" : "All open")
-                    section("Recent", connections: app.recents(excluding: openIDs.union(favorites.map(\.id))), empty: "Connections you use appear here")
+                    if searching {
+                        fullSection("Matches", connections: matches, empty: "No connections match")
+                    } else {
+                        let open = openConnections
+                        let openIDs = Set(open.map(\.id))
+                        let favorites = app.favorites.filter { !openIDs.contains($0.id) }
+                        section("Open now", connections: open, empty: "Nothing open")
+                        section("Favorites", connections: favorites, empty: app.favorites.isEmpty ? "Star a connection to pin it here" : "All open")
+                        section("Recent", connections: app.recents(excluding: openIDs.union(favorites.map(\.id))), empty: "Connections you use appear here")
+                    }
                 }
                 .padding(compact ? 6 : 10)
             }
             .scrollIndicators(compact ? .never : .automatic)
             Divider()
+            if !compact { searchField }
             if compact {
                 Button {
                     openWindow(id: "manager")
@@ -107,6 +122,46 @@ struct SidebarView: View {
             .frame(height: 28)
         }
         .background(Palette.chromeAlt)
+    }
+
+    private var searchField: some View {
+        HStack(spacing: 5) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 10))
+                .foregroundStyle(Palette.textSecondary)
+            TextField("Search connections", text: $query)
+                .textFieldStyle(.plain)
+                .font(.system(size: 11))
+                .focused($searchFocused)
+                .onSubmit {
+                    if let first = matches.first {
+                        app.open(first, newTab: NSEvent.modifierFlags.contains(.command))
+                    }
+                }
+                .onExitCommand {
+                    query = ""
+                    searchFocused = false
+                }
+                .accessibilityLabel("Search connections")
+            if !query.isEmpty {
+                Button {
+                    query = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 10))
+                        .foregroundStyle(Palette.textSecondary)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Clear search")
+            }
+        }
+        .padding(.horizontal, 7)
+        .frame(height: 22)
+        .background(Palette.ground, in: RoundedRectangle(cornerRadius: 5))
+        .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(Palette.border))
+        .padding(.horizontal, 10)
+        .padding(.top, 8)
     }
 
     private var collapseButton: some View {
@@ -250,6 +305,8 @@ struct SidebarRow: View {
                 .disabled(!MountPolicy.canMount(connection))
             }
             Button("Open Side by Side") { app.openSideBySide(connection) }
+            Button("Edit Cron Jobs\u{2026}") { if let s = app.session(for: connection.id) { app.openCronEditor(for: s) } }
+                .disabled(connection.protocol != .sftp || !(app.session(for: connection.id).map { app.canEditCron($0) } ?? false))
             if app.canOpenCPanel(connection) {
                 Button("Open cPanel") { app.openCPanel(for: connection) }
             }

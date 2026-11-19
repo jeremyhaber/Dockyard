@@ -66,6 +66,8 @@ public struct EditEvent: Sendable, Equatable {
         case uploadFailed(String)
         /// The server copy changed since it was downloaded; the upload still went ahead.
         case remoteChangedWarning
+        /// Opened again after the server copy changed: the newer version replaced the local copy.
+        case reloaded
         case closed
     }
 
@@ -83,6 +85,7 @@ public struct EditEvent: Sendable, Equatable {
         case .uploaded: "Uploaded \(fileName) to \(connectionName)"
         case .uploadFailed: "Could not upload \(fileName)"
         case .remoteChangedWarning: "\(fileName) changed on the server while you were editing"
+        case .reloaded: "Downloaded the newer \(fileName) from \(connectionName)"
         case .opened, .changeDetected, .closed: nil
         }
     }
@@ -95,6 +98,7 @@ public struct EditEvent: Sendable, Equatable {
         case .uploaded(let bytes): (.status, "Uploaded \(remotePath) after edit (\(bytes) bytes)")
         case .uploadFailed(let m): (.error, "Upload of \(remotePath) after edit failed: \(m)")
         case .remoteChangedWarning: (.warning, "\(remotePath) changed on the server since it was opened; uploading your version anyway")
+        case .reloaded: (.status, "\(remotePath) changed on the server; downloaded it again for editing")
         case .closed: (.status, "Stopped watching \(remotePath)")
         }
     }
@@ -122,6 +126,7 @@ public actor EditInPlaceCoordinator {
         var baseModified: Date?
         var baseSize: UInt64?
         var uploading = false
+        var reloading = false
         var dirty = false
         var unsynced = false
         var versionKept = false
@@ -160,11 +165,13 @@ public actor EditInPlaceCoordinator {
         return stream
     }
 
-    /// Downloads the file and starts watching it. Opening the same file again returns the running session.
+    /// Downloads the file and starts watching it. Opening the same file again returns the running session,
+    /// after downloading it again when the server copy changed and the local copy has no unuploaded saves.
     public func open(
         fs: any RemoteFileSystem, remotePath: String, connectionId: UUID, connectionName: String, beforeOverwrite: BeforeOverwrite? = nil
     ) async throws -> EditSession {
         if let existing = live.values.first(where: { $0.session.connectionId == connectionId && $0.session.remotePath == remotePath }) {
+            try await reloadIfServerChanged(existing)
             return existing.session
         }
         let id = UUID()
@@ -183,10 +190,7 @@ public actor EditInPlaceCoordinator {
         live[id] = entry
         // Local copy keeps the server's modification time so "newer" comparisons stay meaningful.
         if let m = entry.baseModified { try? FileManager.default.setAttributes([.modificationDate: m], ofItemAtPath: local.path) }
-        let changes = watcher.changes(of: local)
-        entry.watchTask = Task { [weak self] in
-            for await _ in changes { await self?.fileChanged(id) }
-        }
+        startWatching(entry)
         emit(session, .opened)
         return session
     }
@@ -219,6 +223,41 @@ public actor EditInPlaceCoordinator {
 
     // MARK: Internals
 
+    private func startWatching(_ entry: Live) {
+        let id = entry.session.id
+        let changes = watcher.changes(of: entry.session.localURL)
+        entry.watchTask = Task { [weak self] in
+            for await _ in changes { await self?.fileChanged(id) }
+        }
+    }
+
+    /// Replaces the local copy with the server's when the server file changed since it was downloaded or last uploaded.
+    /// Local saves that have not reached the server are kept (the next upload warns about the server change instead).
+    private func reloadIfServerChanged(_ entry: Live) async throws {
+        guard !entry.unsynced, !entry.uploading, !entry.reloading,
+              let remote = try? await entry.fs.lookup(entry.session.remotePath),
+              Self.differs(remote, from: entry) else { return }
+        guard !entry.unsynced, !entry.uploading, !entry.reloading, live[entry.session.id] === entry else { return }
+        entry.reloading = true
+        defer { entry.reloading = false }
+        // Stop watching so the download itself is not taken for a save and uploaded back.
+        entry.watchTask?.cancel()
+        defer { if live[entry.session.id] === entry { startWatching(entry) } }
+        let s = entry.session
+        try await download(entry.fs, s.remotePath, to: s.localURL, label: s.connectionName)
+        let item = (try? await entry.fs.lookup(s.remotePath)) ?? remote
+        entry.baseModified = item.modified
+        entry.baseSize = item.size
+        if let m = item.modified { try? FileManager.default.setAttributes([.modificationDate: m], ofItemAtPath: s.localURL.path) }
+        emit(s, .reloaded)
+    }
+
+    private static func differs(_ remote: RemoteItem, from entry: Live) -> Bool {
+        if let base = entry.baseModified, let current = remote.modified, current != base { return true }
+        if let base = entry.baseSize, remote.size != base { return true }
+        return false
+    }
+
     private func removeSubscriber(_ key: UUID) { subscribers.removeValue(forKey: key) }
 
     private func emit(_ s: EditSession, _ kind: EditEvent.Kind) {
@@ -229,6 +268,7 @@ public actor EditInPlaceCoordinator {
     private func fileChanged(_ id: UUID) async {
         guard let entry = live[id] else { return }
         entry.unsynced = true
+        if entry.reloading { return }
         if entry.uploading { entry.dirty = true; return }  // picked up when the running upload ends
         entry.uploading = true
         defer { entry.uploading = false }
@@ -241,8 +281,7 @@ public actor EditInPlaceCoordinator {
 
     private func upload(_ entry: Live) async {
         let s = entry.session
-        if let remote = try? await entry.fs.lookup(s.remotePath), let base = entry.baseModified,
-           let current = remote.modified, current != base || (entry.baseSize != nil && remote.size != entry.baseSize) {
+        if let remote = try? await entry.fs.lookup(s.remotePath), Self.differs(remote, from: entry) {
             emit(s, .remoteChangedWarning)
         }
         let bytes = LocalFileSize.size(of: s.localURL) ?? 0

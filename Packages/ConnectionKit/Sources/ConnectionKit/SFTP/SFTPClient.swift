@@ -189,6 +189,27 @@ final class SFTPClient: @unchecked Sendable {
         try expectOK(roundTrip(SFTPType.rename) { $0.string(from); $0.string(to) })
     }
 
+    /// Each symlink's target and the attributes of what it points at (nil where the server refused), with every
+    /// request sent before waiting so a group of links costs one round trip instead of two per link.
+    func resolveLinks(_ paths: [String]) throws -> [(target: String?, attributes: SFTPAttributes?)] {
+        var ids: [(link: UInt32, stat: UInt32)] = []
+        for path in paths {
+            ids.append((try submit(SFTPType.readlink) { $0.string(path) }, try submit(SFTPType.stat) { $0.string(path) }))
+        }
+        var responses: [UInt32: SFTPResponse] = [:]
+        let all = ids.flatMap { [$0.link, $0.stat] }
+        while responses.count < all.count {
+            for (id, response) in try collect(all.filter { responses[$0] == nil }, waitForOne: true) { responses[id] = response }
+        }
+        return ids.map { pair in
+            var target: String?
+            if case .names(let names)? = responses[pair.link] { target = names.first?.name }
+            var attributes: SFTPAttributes?
+            if case .attributes(let a)? = responses[pair.stat] { attributes = a }
+            return (target, attributes)
+        }
+    }
+
     func readlink(_ path: String) throws -> String {
         let response = try roundTrip(SFTPType.readlink) { $0.string(path) }
         guard case .names(let names) = response, let first = names.first else {
@@ -199,14 +220,18 @@ final class SFTPClient: @unchecked Sendable {
     }
 
     /// All entries of a directory except `.` and `..`, with lstat-style attributes.
-    func listDirectory(_ path: String) throws -> [SFTPEntry] {
+    /// `onBatch` gets each server reply's entries as it arrives.
+    @discardableResult
+    func listDirectory(_ path: String, onBatch: ([SFTPEntry]) -> Void = { _ in }) throws -> [SFTPEntry] {
         let handle = try expectHandle(roundTrip(SFTPType.opendir) { $0.string(path) })
         defer { try? closeHandle(handle) }
         var entries: [SFTPEntry] = []
         while true {
             let response = try roundTrip(SFTPType.readdir) { $0.string(handle) }
-            if case .names(let batch) = response {
-                entries.append(contentsOf: batch.filter { $0.name != "." && $0.name != ".." })
+            if case .names(let names) = response {
+                let batch = names.filter { $0.name != "." && $0.name != ".." }
+                entries.append(contentsOf: batch)
+                if !batch.isEmpty { onBatch(batch) }
             } else if case .status(let code, _) = response, code == SFTPStatusError.Code.eof.rawValue {
                 return entries
             } else {

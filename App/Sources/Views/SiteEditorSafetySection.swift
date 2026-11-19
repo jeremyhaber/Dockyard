@@ -18,6 +18,9 @@ struct SiteEditorSafetySection: View {
                 Toggle("Verify checksums after SFTP transfers", isOn: $draft.verifyChecksums)
                 Text("Compares SHA-256 of each file with sha256sum on the server. A mismatch fails the item.")
                     .font(.caption).foregroundStyle(Palette.textSecondary)
+                Toggle("Delete folders with rm -rf over SSH", isOn: $draft.shellFolderDelete)
+                Text("Much faster than removing each file over SFTP. Falls back to SFTP when the account cannot run commands.")
+                    .font(.caption).foregroundStyle(Palette.textSecondary)
             }
             Picker("When a file already exists", selection: $draft.defaultConflict) {
                 Text("Use the Settings default").tag(ConflictPolicy.ask)

@@ -8,6 +8,8 @@ import Observation
 final class SafetyCenter {
     /// The session whose Versions sheet is open.
     var versionsSessionID: UUID?
+    /// The session whose cron editor sheet is open.
+    var cronSessionID: UUID?
     private(set) var pins: [UUID: [PinnedFolder]] = [:]
     @ObservationIgnored private var searches: [UUID: SearchModel] = [:]
 
@@ -53,6 +55,8 @@ final class SearchModel {
     var isOpen = false
     var byContent = false
     var caseSensitive = false
+    /// Name search only: list folders, not files.
+    var foldersOnly = false
     var text = ""
     private(set) var focusToken = 0
     private(set) var hits: [SearchHit] = []
@@ -92,7 +96,8 @@ final class SearchModel {
         progress = nil
         searchedRoot = root
         isRunning = true
-        let spec = SearchQuery(mode: byContent ? .content : .name, text: query, root: root, caseSensitive: caseSensitive)
+        let spec = SearchQuery(mode: byContent ? .content : .name, text: query, root: root, caseSensitive: caseSensitive,
+                               foldersOnly: foldersOnly && !byContent)
         task = Task { [weak self] in
             for await event in RemoteSearch.search(spec, on: fs) {
                 guard let self else { return }

@@ -10,6 +10,11 @@ public final class ShellChannel: @unchecked Sendable {
     private let channel: SSHChannel
     private var assistant: ElevationAssistant?
     private var isFinished = false
+    private let handlerLock = NSLock()
+    private var elevationHandler: (@Sendable () -> Void)?
+    /// True while a new shell (`su -`, `sudo -i`, `su - user`) is still being started on this channel.
+    private var elevating = false
+    private var runAsFireAt: Date?
 
     // Created on the session queue by `SSHSession.openShell`.
     init(session: SSHSession, channel: SSHChannel, elevation: ShellElevation?, runAs: String? = nil) {
@@ -19,6 +24,8 @@ public final class ShellChannel: @unchecked Sendable {
         if let runAs {
             // Logged in as root: root's su needs no password.
             try? channel.write(Array("exec su -s /bin/bash - \(runAs)\n".utf8))
+            elevating = true
+            runAsFireAt = Date().addingTimeInterval(1.5)
             session.log(.status, "Switching the shell to \(runAs)")
         } else if let elevation, elevation.kind != .none {
             let command = elevation.kind == .su ? "su -" : "sudo -i"
@@ -28,10 +35,30 @@ public final class ShellChannel: @unchecked Sendable {
                 session.log(.warning, "No elevation password stored; run \(command) manually")
             }
             if assistant != nil {
+                elevating = true
                 try? channel.write(Array((command + "\n").utf8))
                 session.log(.status, "Elevating shell with \(command)")
             }
         }
+    }
+
+    /// Calls `handler` once when the automatic elevation has produced its new shell (the shell the user was in is gone,
+    /// so anything defined in it is too). Returns false when no elevation is in progress, and the handler is dropped.
+    public func onElevated(_ handler: @escaping @Sendable () -> Void) -> Bool {
+        handlerLock.lock()
+        defer { handlerLock.unlock() }
+        guard elevating else { return false }
+        elevationHandler = handler
+        return true
+    }
+
+    private func fireElevated() {
+        handlerLock.lock()
+        let handler = elevationHandler
+        elevationHandler = nil
+        elevating = false
+        handlerLock.unlock()
+        handler?()
     }
 
     public func write(_ data: Data) async throws {
@@ -61,6 +88,10 @@ public final class ShellChannel: @unchecked Sendable {
                 }
             }
             tickAssistant()
+            if let runAsFireAt, Date() >= runAsFireAt {
+                self.runAsFireAt = nil
+                fireElevated()
+            }
             if channel.isEOF { finish() }
         } catch {
             finish()
@@ -94,9 +125,14 @@ public final class ShellChannel: @unchecked Sendable {
         case .succeeded(let command):
             session.log(.status, "Shell elevated with \(command)")
             assistant = nil
+            fireElevated()
         case .failed(let reason):
             session.log(.warning, "Shell elevation failed: \(reason)")
             assistant = nil
+            handlerLock.lock()
+            elevationHandler = nil
+            elevating = false
+            handlerLock.unlock()
         case nil:
             break
         }

@@ -10,6 +10,13 @@ enum AppSettings {
     static let finderPollSeconds = AppGroup.pollIntervalKey
     static let whmSyncHours = "whmSyncHours"
     static let editorApp = "editorApp"
+    static let terminalSuggestions = "terminalSuggestions"
+    /// Superseded by `terminalEditorChoice`; still read once so a "never" answer carries over.
+    static let terminalOpenEditorsInApp = "terminalOpenEditorsInApp"
+    static let terminalEditorChoiceKey = "terminalEditorChoice"
+    /// Run the server's syntax checker on a file before the inline editor saves it. On unless turned off.
+    static let checkFilesBeforeSaving = "checkFilesBeforeSaving"
+    static var checkBeforeSaving: Bool { UserDefaults.standard.object(forKey: checkFilesBeforeSaving) as? Bool ?? true }
 
     static let launchLeftovers = "launchLeftovers"
     static let defaultConflict = "defaultConflict"
@@ -23,6 +30,21 @@ enum AppSettings {
     static var maxConnections: Int {
         let stored = UserDefaults.standard.integer(forKey: globalMaxConnections)
         return stored == 0 ? defaultGlobalMaxConnections : min(max(stored, globalMaxRange.lowerBound), globalMaxRange.upperBound)
+    }
+
+    /// What typing `nano`, `vim` and the like in the terminal does.
+    enum TerminalEditorChoice: String, CaseIterable, Identifiable {
+        case dockyard, macEditor, terminal
+        var id: String { rawValue }
+    }
+
+    /// The saved choice. Before it existed the setting was a Bool: false meant run the editor in the terminal.
+    static var terminalEditorChoice: TerminalEditorChoice {
+        let defaults = UserDefaults.standard
+        if let stored = defaults.string(forKey: terminalEditorChoiceKey).flatMap(TerminalEditorChoice.init(rawValue:)) {
+            return stored
+        }
+        return defaults.object(forKey: terminalOpenEditorsInApp) as? Bool == false ? .terminal : .dockyard
     }
 
     /// What to do about existing files when nothing more specific applies.
