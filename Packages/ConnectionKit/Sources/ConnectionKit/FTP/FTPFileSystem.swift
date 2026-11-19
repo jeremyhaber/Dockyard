@@ -262,52 +262,96 @@ public actor FTPFileSystem: RemoteFileSystem {
         }
     }
 
-    /// Callers must hold `lock`.
-    private func listLocked(_ path: String, on control: FTPControlChannel) async throws -> [RemoteItem] {
+    /// Sends entries as each chunk of the listing arrives.
+    public nonisolated func listStream(_ path: String) -> AsyncThrowingStream<ListingUpdate, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    try Self.validate(path: path)
+                    try await self.lock.withLock {
+                        _ = try await self.listLocked(path, on: try await self.activeControl()) { continuation.yield(.added($0)) }
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
+    /// Callers must hold `lock`. `onItems` gets the entries parsed from each chunk as it arrives.
+    private func listLocked(
+        _ path: String, on control: FTPControlChannel, onItems: ([RemoteItem]) -> Void = { _ in }
+    ) async throws -> [RemoteItem] {
         if supportsMLST {
             do {
-                let lines = try await retrieveListing("MLSD \(path)", on: control)
-                return lines.compactMap { FTPListParser.parseMLSD($0, parent: path) }
+                let parse = { (lines: [String]) in lines.compactMap { FTPListParser.parseMLSD($0, parent: path) } }
+                let lines = try await retrieveListing("MLSD \(path)", on: control) { onItems(parse($0)) }
+                return parse(lines)
             } catch RemoteError.serverRejected(let code, _) where [500, 501, 502, 504].contains(code) {
                 supportsMLST = false
             }
         }
-        return try await listWithLIST(path, on: control)
+        return try await listWithLIST(path, on: control, onItems: onItems)
     }
 
-    private func listWithLIST(_ path: String, on control: FTPControlChannel) async throws -> [RemoteItem] {
+    private func listWithLIST(_ path: String, on control: FTPControlChannel, onItems: ([RemoteItem]) -> Void) async throws -> [RemoteItem] {
+        let now = Date()
+        let parse = { (lines: [String]) in
+            lines.compactMap { FTPListParser.parseUnixList($0, parent: path, now: now) }.filter { $0.name != "." && $0.name != ".." }
+        }
+        let onLines: ([String]) -> Void = { onItems(parse($0)) }
         var lines: [String]
         if listUsesAllFlag {
             do {
-                lines = try await retrieveListing("LIST -a \(path)", on: control)
+                lines = try await retrieveListing("LIST -a \(path)", on: control, onLines: onLines)
             } catch RemoteError.serverRejected(let code, _) where [500, 501, 502, 504].contains(code) {
                 listUsesAllFlag = false
-                lines = try await retrieveListing("LIST \(path)", on: control)
+                lines = try await retrieveListing("LIST \(path)", on: control, onLines: onLines)
             }
         } else {
-            lines = try await retrieveListing("LIST \(path)", on: control)
+            lines = try await retrieveListing("LIST \(path)", on: control, onLines: onLines)
         }
-        let now = Date()
-        return lines.compactMap { FTPListParser.parseUnixList($0, parent: path, now: now) }
-            .filter { $0.name != "." && $0.name != ".." }
+        return parse(lines)
     }
 
-    private func retrieveListing(_ command: String, on control: FTPControlChannel) async throws -> [String] {
+    /// The listing's non-empty lines. `onLines` gets the complete lines of each chunk as it arrives.
+    private func retrieveListing(
+        _ command: String, on control: FTPControlChannel, onLines: ([String]) -> Void = { _ in }
+    ) async throws -> [String] {
         let (channel, _) = try await openDataChannel(on: control)
         let async = try await asyncWrapped(channel)
-        var data = Data()
+        var lines: [String] = []
+        var pending: [UInt8] = []
+        func take(_ bytes: ArraySlice<UInt8>) -> [String] {
+            bytes.split(whereSeparator: { $0 == 0x0A || $0 == 0x0D }).map {
+                String(bytes: $0, encoding: .utf8) ?? String(decoding: $0, as: UTF8.self)
+            }
+        }
         try await async.executeThenClose { inbound, _ in
             let start = try await control.command(command)
             guard start.isPreliminary else { throw RemoteError.serverRejected(code: start.code, message: start.message) }
             do {
                 for try await var chunk in inbound {
-                    data.append(contentsOf: chunk.readBytes(length: chunk.readableBytes) ?? [])
+                    pending.append(contentsOf: chunk.readBytes(length: chunk.readableBytes) ?? [])
+                    guard let end = pending.lastIndex(where: { $0 == 0x0A || $0 == 0x0D }) else { continue }
+                    let complete = take(pending[...end])
+                    pending.removeFirst(end + 1)
+                    if !complete.isEmpty {
+                        lines.append(contentsOf: complete)
+                        onLines(complete)
+                    }
                 }
             } catch NIOSSLError.uncleanShutdown {}
         }
+        let last = take(pending[...])
+        if !last.isEmpty {
+            lines.append(contentsOf: last)
+            onLines(last)
+        }
         _ = try check(try await control.readReply(), command, { $0.isCompletion })
-        let text = String(data: data, encoding: .utf8) ?? String(decoding: data, as: UTF8.self)
-        return text.split(whereSeparator: \.isNewline).map(String.init).filter { !$0.isEmpty }
+        return lines
     }
 
     // MARK: Transfers

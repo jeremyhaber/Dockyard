@@ -55,6 +55,13 @@ private func printfOutput(pid: Int = 4242, _ records: [(type: String, size: Int,
         #expect(command.contains("'-name' '*readme*'"))
     }
 
+    @Test func foldersOnlyAddsTypeD() async throws {
+        let shell = fs { _ in ("1\n", "", 1) }
+        _ = await collect(RemoteSearch.search(SearchQuery(mode: .name, text: "uploads", root: "/w", foldersOnly: true), on: shell))
+        let command = try #require(shell.commands.withLock { $0 }.first)
+        #expect(command.contains("'find' '/w' '-type' 'd' '-iname' '*uploads*'"))
+    }
+
     @Test func rootStartingWithDashIsProtected() async throws {
         let shell = fs { _ in ("1\n", "", 1) }
         _ = await collect(RemoteSearch.search(SearchQuery(mode: .name, text: "x", root: "-rf"), on: shell))
@@ -143,6 +150,12 @@ private func printfOutput(pid: Int = 4242, _ records: [(type: String, size: Int,
     @Test func matchesFoldersToo() async throws {
         let result = await collect(RemoteSearch.search(SearchQuery(mode: .name, text: "themes", root: "/site"), on: tree()))
         #expect(result.hits.map(\.path) == ["/site/wp-content/themes"] && result.hits[0].isDirectory == true)
+    }
+
+    @Test func foldersOnlySkipsFiles() async throws {
+        let result = await collect(RemoteSearch.search(SearchQuery(mode: .name, text: "*t*", root: "/site", foldersOnly: true), on: tree()))
+        #expect(Set(result.hits.map(\.path)) == ["/site/wp-content", "/site/empty", "/site/wp-content/themes", "/site/wp-content/themes/twenty"])
+        #expect(result.hits.allSatisfy { $0.isDirectory == true })
     }
 
     @Test func reportsProgressPerFolder() async throws {

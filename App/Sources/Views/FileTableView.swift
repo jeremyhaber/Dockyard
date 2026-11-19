@@ -5,22 +5,28 @@ import SwiftUI
 
 // MARK: - AppKit pieces
 
+/// The text a key press types, when it should start a find in the file list or folder tree: printable characters
+/// without ⌘ or ⌃ (and not a lone space, which Quick Look uses). Arrows, Return, Tab and the like return nil.
+@MainActor
+func typeToFindText(_ event: NSEvent) -> String? {
+    guard event.modifierFlags.intersection([.command, .control]).isEmpty,
+          let chars = event.characters, !chars.isEmpty, chars != " " else { return nil }
+    let printable = chars.unicodeScalars.allSatisfy {
+        !CharacterSet.controlCharacters.contains($0) && !(0xF700...0xF8FF).contains($0.value)
+    }
+    return printable ? chars : nil
+}
+
 final class FileNSTableView: NSTableView {
-    var onCommandClickRow: ((Int) -> Bool)?
     var onReturn: (() -> Void)?
     var onDeleteKey: (() -> Void)?
     var onSpace: (() -> Void)?
     var onFocus: (() -> Void)?
-
-    override func mouseDown(with event: NSEvent) {
-        if event.modifierFlags.contains(.command) {
-            let row = self.row(at: convert(event.locationInWindow, from: nil))
-            if row >= 0, onCommandClickRow?(row) == true { return }
-        }
-        super.mouseDown(with: event)
-    }
+    /// Typing a name starts a find in the list; returns whether it took the key.
+    var onTypeToFind: ((String) -> Bool)?
 
     override func keyDown(with event: NSEvent) {
+        if let text = typeToFindText(event), onTypeToFind?(text) == true { return }
         switch event.keyCode {
         case 36, 76: onReturn?()
         case 51, 117: onDeleteKey?()
@@ -46,6 +52,21 @@ final class SelectionRowView: NSTableRowView {
         guard isSelected else { return }
         Palette.ns("Selection").setFill()
         bounds.fill()
+    }
+}
+
+/// Browser-style find highlights: matches on yellow, the current match on orange.
+@MainActor
+enum FindHighlight {
+    static func string(_ name: String, range: Range<String.Index>, font: NSFont, current: Bool) -> NSAttributedString {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineBreakMode = .byTruncatingMiddle
+        let out = NSMutableAttributedString(string: name, attributes: [.font: font, .paragraphStyle: paragraph])
+        out.addAttributes([
+            .backgroundColor: current ? NSColor.systemOrange : NSColor.findHighlightColor,
+            .foregroundColor: NSColor.black,
+        ], range: NSRange(range, in: name))
+        return out
     }
 }
 
@@ -89,9 +110,13 @@ final class NameCellView: NSTableCellView {
 }
 
 final class TextCellView: NSTableCellView {
+    override var backgroundStyle: NSView.BackgroundStyle {
+        didSet { applySelectionInk(emphasized: backgroundStyle == .emphasized) }
+    }
+
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        let label = NSTextField(labelWithString: "")
+        let label = InkLabel(labelWithString: "")
         label.translatesAutoresizingMaskIntoConstraints = false
         label.lineBreakMode = .byTruncatingTail
         addSubview(label)
@@ -114,6 +139,8 @@ struct FileTableView: NSViewRepresentable {
     /// Changes whenever the rows change; SwiftUI calls `updateNSView` when it does.
     let version: Int
     let sort: FileSort
+    /// Changes whenever the find bar's highlights or current match change.
+    let find: Int
 
     func makeCoordinator() -> FileTableCoordinator {
         FileTableCoordinator(app: AppModel.shared, pane: pane, session: session)
@@ -134,7 +161,7 @@ struct FileTableView: NSViewRepresentable {
     }
 
     func updateNSView(_ scroll: NSScrollView, context: Context) {
-        context.coordinator.update(version: version, sort: sort)
+        context.coordinator.update(version: version, sort: sort, find: find)
     }
 }
 
@@ -149,6 +176,9 @@ final class FileTableCoordinator: NSObject, NSTableViewDataSource, NSTableViewDe
     private var rows: [FileRow] = []
     private var lastVersion = -1
     private var suppressSort = false
+    private var lastFind: Int?
+    private var lastFindMove = 0
+    private var findWasActive = false
 
     private static let nameID = NSUserInterfaceItemIdentifier("name")
     private static let sizeID = NSUserInterfaceItemIdentifier("size")
@@ -201,10 +231,13 @@ final class FileTableCoordinator: NSObject, NSTableViewDataSource, NSTableViewDe
         menu.delegate = self
         table.menu = menu
 
-        table.onCommandClickRow = { [weak self] row in self?.commandClick(row) ?? false }
         table.onReturn = { [weak self] in self?.openSelection() }
         table.onDeleteKey = { [weak self] in self?.deleteSelection() }
         table.onSpace = { [weak self] in self?.quickLook() }
+        table.onTypeToFind = { [weak self] text in
+            self?.pane.startFind(typing: text, scope: .files)
+            return self != nil
+        }
         table.onFocus = { [weak self] in
             guard let self else { return }
             self.app.focusedSide = self.pane.side
@@ -215,7 +248,7 @@ final class FileTableCoordinator: NSObject, NSTableViewDataSource, NSTableViewDe
         }
     }
 
-    func update(version: Int, sort: FileSort) {
+    func update(version: Int, sort: FileSort, find: Int) {
         guard let table else { return }
         if let descriptor = table.sortDescriptors.first, descriptor.key == sort.key.rawValue, descriptor.ascending == sort.ascending {
             // in sync
@@ -224,8 +257,36 @@ final class FileTableCoordinator: NSObject, NSTableViewDataSource, NSTableViewDe
             table.sortDescriptors = [NSSortDescriptor(key: sort.key.rawValue, ascending: sort.ascending)]
             suppressSort = false
         }
-        guard version != lastVersion else { return }
-        lastVersion = version
+        if version != lastVersion {
+            lastVersion = version
+            reloadRows(table)
+        } else if find != lastFind {
+            // Only the highlights changed: redraw the name cells (AppKit only rebuilds the ones that exist).
+            if let column = table.tableColumns.firstIndex(where: { $0.identifier == Self.nameID }) {
+                table.reloadData(forRowIndexes: IndexSet(integersIn: 0..<rows.count), columnIndexes: IndexSet(integer: column))
+            }
+        }
+        lastFind = find
+        followFind(table)
+    }
+
+    /// Selects and scrolls to the find bar's current match when it moves, and takes focus back when the bar closes.
+    private func followFind(_ table: FileNSTableView) {
+        let active = pane.findOpen && pane.findScope == .files
+        if active, pane.findMoveToken != lastFindMove {
+            lastFindMove = pane.findMoveToken
+            if let id = pane.findCurrent, let row = rows.firstIndex(where: { $0.id == id }) {
+                table.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+                table.scrollRowToVisible(row)
+            }
+        }
+        if findWasActive, !active, table.window?.firstResponder === table.window {
+            table.window?.makeFirstResponder(table)
+        }
+        findWasActive = active
+    }
+
+    private func reloadRows(_ table: FileNSTableView) {
         let selected = Set(table.selectedRowIndexes.compactMap { $0 < rows.count ? rows[$0].id : nil })
         rows = pane.rows
         table.reloadData()
@@ -269,7 +330,12 @@ final class FileTableCoordinator: NSObject, NSTableViewDataSource, NSTableViewDe
                 cell.imageView?.image = Symbols.parent
                 cell.imageView?.contentTintColor = .secondaryLabelColor
             case .item(let item):
-                cell.textField?.stringValue = item.name
+                if let range = pane.findHighlight(in: item.name, for: .files) {
+                    cell.textField?.attributedStringValue = FindHighlight.string(
+                        item.name, range: range, font: .systemFont(ofSize: 13), current: pane.findCurrent == item.path)
+                } else {
+                    cell.textField?.stringValue = item.name
+                }
                 if item.isDirectory {
                     cell.imageView?.image = Symbols.folder
                     cell.imageView?.contentTintColor = .controlAccentColor
@@ -349,12 +415,6 @@ final class FileTableCoordinator: NSObject, NSTableViewDataSource, NSTableViewDe
 
     private func quickLook() {
         QuickLookCenter.shared.toggle(pane.selectedItems, side: pane.side, session: session)
-    }
-
-    private func commandClick(_ row: Int) -> Bool {
-        guard row < rows.count, case .item(let item) = rows[row], item.isDirectory else { return false }
-        pane.openTab(at: item.path, activate: false)
-        return true
     }
 
     // MARK: Drag source
@@ -448,6 +508,9 @@ final class FileTableCoordinator: NSObject, NSTableViewDataSource, NSTableViewDe
         var editsFile = false
         if case .item(let item) = selection.first { editsFile = !item.isDirectory }
         add(editsFile ? "Edit" : "Open", #selector(menuOpen))
+        if editsFile, server, session.shellAvailable, session.status.isConnected {
+            add("Edit in Terminal Editor", #selector(menuEditInTerminal))
+        }
         if items.contains(where: { !$0.isDirectory }) { add("Quick Look", #selector(menuQuickLook)) }
         if singleFolder { add("Open in New Tab", #selector(menuOpenInTab)) }
         menu.addItem(.separator())
@@ -522,6 +585,18 @@ final class FileTableCoordinator: NSObject, NSTableViewDataSource, NSTableViewDe
     @objc private func menuOpen() { openSelection() }
 
     @objc private func menuQuickLook() { quickLook() }
+
+    /// Opens the file in the inline editor of the connection's active shell tab, showing the terminal drawer.
+    @objc private func menuEditInTerminal() {
+        guard let item = pane.selectedItems.first, !item.isDirectory else { return }
+        app.drawerTab = .terminal
+        app.drawerVisible = true
+        let controller = session.activeTerminal
+        Task { @MainActor in
+            if controller.phase == .idle { controller.start() }
+            if !(await controller.openInlineEditor(item.path)) { app.edits.edit(item, in: session) }
+        }
+    }
 
     @objc private func menuOpenInTab() {
         if let item = pane.selectedItems.first { pane.openTab(at: item.path, activate: false) }

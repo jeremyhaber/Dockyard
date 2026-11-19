@@ -4,6 +4,8 @@
 #   2223  AuthenticationMethods publickey,password (both on one connection)
 #   2224  keyboard-interactive only (PAM)
 #   2226  root by public key only (the account cpuser has no login shell)
+# The user sftponly gets ForceCommand internal-sftp on 2222: commands are ignored, like SFTP-only hosting.
+# The user splitview runs commands in a chroot but SFTP outside it (split-view.sh): the two see different files.
 # PUBLIC_KEY: authorized_keys content for users dockyard and root.
 set -e
 printf '%s\n' "$PUBLIC_KEY" > /etc/ssh/authorized_keys/dockyard
@@ -24,6 +26,10 @@ Port 2222
 PasswordAuthentication yes
 KbdInteractiveAuthentication no
 $common
+Match User sftponly
+  ForceCommand internal-sftp
+Match User splitview
+  ForceCommand /usr/local/bin/split-view.sh
 EOF
 cat > /etc/ssh/sshd_2223.conf <<EOF
 Port 2223

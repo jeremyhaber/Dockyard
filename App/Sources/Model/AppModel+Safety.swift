@@ -63,11 +63,24 @@ extension AppModel {
 // MARK: - Search
 
 extension AppModel {
-    /// ⌘F: opens the search bar of the active connection's server pane.
+    /// ⌥⌘F: opens the search bar of the active connection's server pane.
     func openSearch() {
         guard let session = activeSession, session.server != nil else { return }
         focusedSide = .server
         safety.search(for: session).open()
+    }
+
+    /// The pane find bar's "Search Server": runs a name search for `text` under `root` straight away.
+    func searchServer(for text: String, under root: String, foldersOnly: Bool, in session: ConnectionSession) {
+        guard let fs = session.fs, session.server != nil else { return }
+        let model = safety.search(for: session)
+        // The find bar matches anywhere in a name; widen a glob the same way so the server finds the same things.
+        model.text = NameFilter.serverPattern(text)
+        model.byContent = false
+        model.foldersOnly = foldersOnly
+        focusedSide = .server
+        model.open()
+        model.run(root: root, on: fs)
     }
 
     /// Shows a search hit in a new folder tab of the server pane.

@@ -45,7 +45,13 @@ final class ConnectionSession: Identifiable {
     /// Set by "Browse files as root" in the terminal bar: the next connect elevates even if the site did not ask for it.
     var rootBrowsingOverride = false
 
-    @ObservationIgnored private var terminalController: TerminalController?
+    /// Bumped when shells are added, closed or selected, so views reading `terminals` update. The lazy first shell does not bump it.
+    private var terminalRevision = 0
+    @ObservationIgnored private var shells: [TerminalController] = []
+    /// Which checkers and web servers the server has, found once by the inline editor.
+    @ObservationIgnored var editorTools: ServerTools?
+    @ObservationIgnored private var activeShellID: UUID?
+    @ObservationIgnored private var shellCounter = 0
     @ObservationIgnored private var suppressedKinds: Set<OperationKind> = []
     @ObservationIgnored var onSessionChange: ((ConnectionSession) -> Void)?
     @ObservationIgnored var connectTask: Task<Void, Never>?
@@ -112,7 +118,11 @@ final class ConnectionSession: Identifiable {
         local = nil
         server = nil
         browsingAsRoot = false
-        await terminalController?.stop()
+        for shell in shells { await shell.stop() }
+        shells = []
+        activeShellID = nil
+        shellCounter = 0
+        terminalRevision += 1
         let current = fs
         fs = nil
         await current?.disconnect()
@@ -127,10 +137,64 @@ final class ConnectionSession: Identifiable {
 
     var shellAvailable: Bool { fs?.supportsShell ?? false }
 
-    func terminal() -> TerminalController {
-        if let terminalController { return terminalController }
-        let created = TerminalController(session: self)
-        terminalController = created
+    /// Shell tabs in creation order (the first is created on demand).
+    var terminals: [TerminalController] {
+        _ = terminalRevision
+        _ = activeTerminal
+        return shells
+    }
+
+    /// The selected shell; creates "Shell 1" when there is none yet.
+    var activeTerminal: TerminalController {
+        _ = terminalRevision
+        if let id = activeShellID, let found = shells.first(where: { $0.id == id }) { return found }
+        if let first = shells.first {
+            activeShellID = first.id
+            return first
+        }
+        return makeShell()
+    }
+
+    /// The active shell (kept for callers that just want "the terminal").
+    func terminal() -> TerminalController { activeTerminal }
+
+    @discardableResult
+    func newTerminal() -> TerminalController {
+        _ = activeTerminal
+        let created = makeShell()
+        terminalRevision += 1
+        return created
+    }
+
+    func selectTerminal(_ controller: TerminalController) {
+        guard shells.contains(where: { $0.id == controller.id }), activeShellID != controller.id else { return }
+        activeShellID = controller.id
+        terminalRevision += 1
+    }
+
+    /// Stops and removes a shell. Closing the last one leaves a fresh idle "Shell 1".
+    func closeTerminal(_ controller: TerminalController) {
+        guard let index = shells.firstIndex(where: { $0.id == controller.id }) else { return }
+        shells.remove(at: index)
+        if shells.isEmpty { shellCounter = 0 }
+        if activeShellID == controller.id {
+            activeShellID = shells.isEmpty ? nil : shells[min(index, shells.count - 1)].id
+        }
+        terminalRevision += 1
+        Task { await controller.stop() }
+        if shells.isEmpty { _ = activeTerminal }
+    }
+
+    private func makeShell() -> TerminalController {
+        shellCounter += 1
+        let created = TerminalController(session: self, title: "Shell \(shellCounter)")
+        // `crontab -e` typed in this shell opens the visual cron editor instead.
+        created.onEditCrontab = { [weak self] in
+            guard let self else { return }
+            AppModel.shared.openCronEditor(for: self)
+        }
+        shells.append(created)
+        activeShellID = created.id
         return created
     }
 

@@ -178,6 +178,7 @@ public final class DockyardDatabase: Sendable {
         migrator.registerLoginUserRepairMigration()
         migrator.registerLocalStartMigration()
         migrator.registerImmediateTransfersMigration()
+        migrator.registerShellFolderDeleteMigration()
         return migrator
     }
 }

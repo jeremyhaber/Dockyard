@@ -89,6 +89,8 @@ func exercise(_ fs: any RemoteFileSystem, supportsPermissions: Bool = true, miss
     #expect(up.completedUnitCount == Int64(content.count), sourceLocation: sourceLocation)
 
     let listed = try await fs.list(base)
+    let streamed = try await fs.collectListing(base)
+    #expect(streamed.map(\.name).sorted() == listed.map(\.name).sorted(), sourceLocation: sourceLocation)
     let item = try #require(listed.first { $0.name == "data file.bin" }, sourceLocation: sourceLocation)
     #expect(item.size == UInt64(content.count), sourceLocation: sourceLocation)
     #expect(!item.isDirectory, sourceLocation: sourceLocation)
@@ -282,6 +284,162 @@ func exercise(_ fs: any RemoteFileSystem, supportsPermissions: Bool = true, miss
         let home = try await fs.homeDirectory()
         for _ in 0..<250 { _ = try await fs.list(home) }
         await fs.disconnect()
+    }
+
+    @Test func streamedListingArrivesInBatchesAndResolvesSymlinksAfter() async throws {
+        let config = sftpConfig(auth: .password)
+        let fs = SFTPFileSystem(config: config, secrets: await store(for: config))
+        try await fs.connect()
+        let home = try await fs.homeDirectory()
+        let dir = RemotePath.join(home, "dockyard-stream-\(UUID().uuidString.prefix(8))")
+        // More entries than one readdir reply holds, and more links than one resolution group.
+        let setup = try await fs.exec(
+            "mkdir -p \(dir)/sub && cd \(dir) && touch $(seq -f 'f%04g' 1 400) && "
+                + "for i in $(seq 1 70); do ln -s f0001 l$i; done && ln -s sub ldir && ln -s missing ldangling")
+        #expect(setup.exitStatus == 0)
+        defer { Task { _ = try? await fs.exec("rm -rf \(dir)"); await fs.disconnect() } }
+
+        var added = 0, updates: [RemoteItem] = []
+        var listing = ListingAccumulator()
+        var sawUnresolvedLink = false
+        for try await update in fs.listStream(dir) {
+            switch update {
+            case .added(let items):
+                added += 1
+                if items.contains(where: { $0.symlinkTarget == "" }) { sawUnresolvedLink = true }
+            case .updated(let items): updates += items
+            }
+            listing.apply(update)
+        }
+        #expect(added > 1)
+        #expect(sawUnresolvedLink)
+        #expect(updates.count == 72)
+        let items = listing.items
+        #expect(items.count == 400 + 1 + 72)
+        #expect(Set(items.map(\.path)).count == items.count)
+        let byName = Dictionary(uniqueKeysWithValues: items.map { ($0.name, $0) })
+        #expect(byName["l1"]?.symlinkTarget == "f0001" && byName["l1"]?.isDirectory == false)
+        #expect(byName["ldir"]?.symlinkTarget == "sub" && byName["ldir"]?.isDirectory == true)
+        #expect(byName["ldangling"]?.symlinkTarget == "missing" && byName["ldangling"]?.isDirectory == false)
+        #expect(byName["sub"]?.isDirectory == true && byName["sub"]?.isSymlink == false)
+        // list() is the same listing, collected.
+        #expect(try await fs.list(dir) == items)
+    }
+
+    @Test(arguments: [true, false])
+    func recursiveDeleteRemovesTheWholeTree(shell: Bool) async throws {
+        let config = sftpConfig(auth: .password)
+        let fs = SFTPFileSystem(config: config, secrets: await store(for: config), options: .init(shellFolderDelete: shell))
+        let lines = LogCollector(fs.logStream)
+        try await fs.connect()
+        let home = try await fs.homeDirectory()
+        let dir = RemotePath.join(home, "dockyard-rm '$(x)-\(UUID().uuidString.prefix(8))")
+        let quoted = ShellQuote.quote(dir)
+        let setup = try await fs.exec(
+            "mkdir -p \(quoted)/a/b && cd \(quoted) && touch $(seq -f 'f%03g' 1 50) a/x a/b/y && ln -s /etc ldir")
+        #expect(setup.exitStatus == 0)
+        defer { Task { _ = try? await fs.exec("rm -rf \(quoted)"); await fs.disconnect() } }
+
+        try await fs.delete(dir, recursive: true)
+
+        #expect(try await fs.stat(dir) == nil)
+        #expect(try await fs.stat("/etc/hostname") != nil)
+        let usedShell = await lines.snapshot().contains { $0.kind == .command && $0.message.contains("rm -rf -- ") }
+        #expect(usedShell == shell)
+    }
+
+    @Test func shellDeleteOnAnSFTPOnlyAccountFallsBackToSFTP() async throws {
+        // ForceCommand internal-sftp: any command starts sftp-server, which exits 0 at EOF without deleting anything.
+        var config = sftpConfig(auth: .password)
+        config.username = "sftponly"
+        let turnedOff = LockedBox(0)
+        var options = SFTPFileSystem.Options()
+        options.onShellFolderDeleteUnavailable = { turnedOff.withLock { $0 += 1 } }
+        let fs = SFTPFileSystem(config: config, secrets: await store(for: config), options: options)
+        let lines = LogCollector(fs.logStream)
+        try await fs.connect()
+        defer { Task { await fs.disconnect() } }
+        let home = try await fs.homeDirectory()
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("rm-\(UUID().uuidString)")
+        try randomData(10).write(to: tmp)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+
+        // The second delete on the connection goes straight to SFTP, without another command.
+        for _ in 0..<2 {
+            let dir = RemotePath.join(home, "dockyard-rm-\(UUID().uuidString.prefix(8))")
+            try await fs.mkdir(dir)
+            try await fs.mkdir(RemotePath.join(dir, "sub"))
+            try await fs.upload(tmp, to: RemotePath.join(dir, "sub/f"), progress: Progress(totalUnitCount: 0))
+            try await fs.delete(dir, recursive: true)
+            #expect(try await fs.stat(dir) == nil)
+        }
+        let snapshot = await lines.snapshot()
+        #expect(snapshot.filter { $0.kind == .command && $0.message.contains("rm -rf -- ") }.count == 1)
+        #expect(snapshot.filter { $0.kind == .warning }.count == 1)
+        #expect(turnedOff.withLock { $0 } == 1)
+        // The SFTP fallback logs each item it removes, then a summary.
+        #expect(snapshot.contains { $0.kind == .command && $0.message.hasPrefix("rm ") && $0.message.hasSuffix("/sub/f") })
+        #expect(snapshot.contains { $0.kind == .command && $0.message.hasPrefix("rmdir ") && $0.message.hasSuffix("/sub") })
+        #expect(snapshot.contains { $0.kind == .status && $0.message.hasPrefix("Deleted ") && $0.message.hasSuffix("(3 items)") })
+    }
+
+    @Test func shellDeleteNeverRunsWhenTheShellSeesOtherFiles() async throws {
+        // splitview: SFTP sees the real /home/splitview, shell commands a chroot with a decoy victim folder.
+        var config = sftpConfig(auth: .password)
+        config.username = "splitview"
+        let turnedOff = LockedBox(0)
+        var options = SFTPFileSystem.Options()
+        options.onShellFolderDeleteUnavailable = { turnedOff.withLock { $0 += 1 } }
+        let fs = SFTPFileSystem(config: config, secrets: await store(for: config), options: options)
+        let lines = LogCollector(fs.logStream)
+        try await fs.connect()
+        defer { Task { await fs.disconnect() } }
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("rm-\(UUID().uuidString)")
+        try randomData(10).write(to: tmp)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        func makeTree(_ dir: String) async throws {
+            try await fs.mkdir(dir)
+            try await fs.mkdir(RemotePath.join(dir, "sub"))
+            try await fs.upload(tmp, to: RemotePath.join(dir, "sub/f"), progress: Progress(totalUnitCount: 0))
+        }
+        let victim = "/home/splitview/victim"
+        try await makeTree(victim)
+        #expect(try await fs.exec("mkdir -p \(victim)/keep").exitStatus == 0)
+
+        try await fs.delete(victim, recursive: true)
+
+        #expect(try await fs.stat(victim) == nil)
+        #expect(try await fs.exec("test -d \(victim)/keep").exitStatus == 0, "the decoy in the shell's view survives")
+        #expect(await lines.snapshot().contains { $0.kind == .warning && $0.message.contains("see different files than SFTP") })
+
+        // Later deletes on this connection skip the shell entirely.
+        let second = "/home/splitview/second-\(UUID().uuidString.prefix(8))"
+        try await makeTree(second)
+        try await fs.delete(second, recursive: true)
+        #expect(try await fs.stat(second) == nil)
+        let deleteCommands = await lines.snapshot().filter { $0.kind == .command && $0.message.contains("rm -rf -- ") }
+        #expect(deleteCommands.count == 1)
+        #expect(turnedOff.withLock { $0 } == 1)
+    }
+
+    @Test func shellDeleteFallsBackToSFTPWhenTheFolderSurvives() async throws {
+        // A root-owned file in a folder the user owns: rm -rf fails on the subfolder, SFTP then reports it.
+        let config = sftpConfig(auth: .password)
+        let turnedOff = LockedBox(0)
+        var options = SFTPFileSystem.Options()
+        options.onShellFolderDeleteUnavailable = { turnedOff.withLock { $0 += 1 } }
+        let fs = SFTPFileSystem(config: config, secrets: await store(for: config), options: options)
+        let lines = LogCollector(fs.logStream)
+        try await fs.connect()
+        let home = try await fs.homeDirectory()
+        let dir = RemotePath.join(home, "dockyard-rm-locked-\(UUID().uuidString.prefix(8))")
+        #expect(try await fs.exec("mkdir -p \(dir)/locked && touch \(dir)/locked/f \(dir)/free && chmod 555 \(dir)/locked").exitStatus == 0)
+        defer { Task { _ = try? await fs.exec("chmod -R 755 \(dir); rm -rf \(dir)"); await fs.disconnect() } }
+
+        await #expect(throws: RemoteError.self) { try await fs.delete(dir, recursive: true) }
+        #expect(try await fs.stat(RemotePath.join(dir, "locked/f")) != nil)
+        #expect(await lines.snapshot().contains { $0.kind == .warning && $0.message.contains("deleting the rest over SFTP") })
+        #expect(turnedOff.withLock { $0 } == 0, "a protected file is not a reason to give up on shell deletes")
     }
 
     @Test func fullScenario() async throws {

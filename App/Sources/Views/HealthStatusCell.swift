@@ -2,9 +2,13 @@ import AppKit
 
 /// The manager's Status cell: a symbol, the status text and, when known, the latency.
 final class StatusCellView: NSTableCellView {
-    private let icon = NSImageView()
-    private let label = NSTextField(labelWithString: "")
-    private let detail = NSTextField(labelWithString: "")
+    private let icon = InkImageView()
+    private let label = InkLabel(labelWithString: "")
+    private let detail = InkLabel(labelWithString: "")
+
+    override var backgroundStyle: NSView.BackgroundStyle {
+        didSet { applySelectionInk(emphasized: backgroundStyle == .emphasized) }
+    }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)

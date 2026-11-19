@@ -1,15 +1,26 @@
 FROM ubuntu:24.04
 RUN apt-get update \
- && apt-get install -y --no-install-recommends openssh-server openssh-client openssh-sftp-server sudo passwd zip unzip bzip2 xz-utils procps \
+ && apt-get install -y --no-install-recommends openssh-server openssh-client openssh-sftp-server sudo passwd zip unzip bzip2 xz-utils procps busybox-static \
  && rm -rf /var/lib/apt/lists/* \
  && userdel -r ubuntu \
  && mkdir -p /run/sshd /etc/ssh/authorized_keys \
  && useradd -m -u 1000 -s /bin/bash dockyard \
  && echo 'dockyard:dockyard-test-pw' | chpasswd \
  && useradd -m -u 1001 -s /usr/sbin/nologin cpuser \
+ && useradd -m -u 1002 -s /bin/bash sftponly \
+ && echo 'sftponly:dockyard-test-pw' | chpasswd \
+ && useradd -m -u 1003 -s /bin/bash splitview \
+ && echo 'splitview:dockyard-test-pw' | chpasswd \
+ && mkdir -p /srv/jail/bin /srv/jail/home/splitview/victim/keep \
+ && cp /bin/busybox /srv/jail/bin/busybox \
+ && for applet in sh rm test mkdir; do ln -s busybox /srv/jail/bin/$applet; done \
+ && chown -R splitview /srv/jail/home/splitview \
+ && echo 'splitview ALL=(root) NOPASSWD: /usr/sbin/chroot --userspec=1003\:1003 /srv/jail /bin/sh -c *' > /etc/sudoers.d/splitview \
+ && chmod 440 /etc/sudoers.d/splitview \
  && echo 'root:root-test-pw' | chpasswd \
  && echo 'dockyard ALL=(ALL) ALL' > /etc/sudoers.d/dockyard \
  && chmod 440 /etc/sudoers.d/dockyard \
  && ssh-keygen -A
 COPY --chmod=755 sshd-entrypoint.sh /entrypoint.sh
+COPY --chmod=755 split-view.sh /usr/local/bin/split-view.sh
 ENTRYPOINT ["/entrypoint.sh"]

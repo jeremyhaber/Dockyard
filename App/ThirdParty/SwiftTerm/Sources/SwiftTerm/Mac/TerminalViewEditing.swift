@@ -27,3 +27,10 @@ extension Terminal {
     }
 }
 #endif
+
+#if os(macOS)
+extension Terminal {
+    /// True when the view shows the newest lines rather than scrollback.
+    public var isScrolledToBottom: Bool { buffer.yDisp == buffer.yBase }
+}
+#endif

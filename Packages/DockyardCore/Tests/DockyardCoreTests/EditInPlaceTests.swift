@@ -64,6 +64,41 @@ import ConnectionKit
         await e.coordinator.stopAll(force: true)
     }
 
+    @Test func reopeningDownloadsAgainWhenServerChanged() async throws {
+        let e = try env()
+        defer { try? FileManager.default.removeItem(at: e.root) }
+        let events = await e.coordinator.events()
+        let a = try await e.coordinator.open(fs: e.server, remotePath: "/www/index.php", connectionId: connA, connectionName: "Prod")
+        e.server.put("/www/index.php", "changed by someone else", modified: t0.addingTimeInterval(500))
+        let reloaded = Task { await firstValue(events) { $0.kind == .reloaded } }
+        let b = try await e.coordinator.open(fs: e.server, remotePath: "/www/index.php", connectionId: connA, connectionName: "Prod")
+        #expect(a == b)
+        #expect(try String(contentsOf: b.localURL, encoding: .utf8) == "changed by someone else")
+        #expect(try #require(await reloaded.value).toast?.contains("newer index.php") == true)
+        // The download is not mistaken for a save: nothing goes back up.
+        await settle(e.clock, polls: 3)
+        #expect(e.server.calls.filter { $0.hasPrefix("upload") }.isEmpty)
+        // Edits after the reload upload with no stale-server warning.
+        try save(b.localURL, "my edit", mtime: t0.addingTimeInterval(600))
+        await settle(e.clock)
+        #expect(await waitUntil { e.server.text("/www/index.php") == "my edit" })
+        await e.coordinator.stopAll(force: true)
+    }
+
+    @Test func reopeningKeepsUnuploadedLocalChanges() async throws {
+        let e = try env()
+        defer { try? FileManager.default.removeItem(at: e.root) }
+        let a = try await e.coordinator.open(fs: e.server, remotePath: "/www/index.php", connectionId: connA, connectionName: "Prod")
+        e.server.failNext("/www/index.php", times: 1, error: RemoteError.permissionDenied("/www/index.php"))
+        try save(a.localURL, "my edit", mtime: t0.addingTimeInterval(600))
+        await settle(e.clock)
+        #expect(await waitUntil { await e.coordinator.hasUnsyncedChanges(a.id) })
+        e.server.put("/www/index.php", "changed by someone else", modified: t0.addingTimeInterval(500))
+        _ = try await e.coordinator.open(fs: e.server, remotePath: "/www/index.php", connectionId: connA, connectionName: "Prod")
+        #expect(try String(contentsOf: a.localURL, encoding: .utf8) == "my edit")
+        await e.coordinator.stopAll(force: true)
+    }
+
     @Test func queuedTransfersShowInTheQueue() async throws {
         let root = try makeTempDir("edit"); defer { try? FileManager.default.removeItem(at: root) }
         let clock = ManualClock()

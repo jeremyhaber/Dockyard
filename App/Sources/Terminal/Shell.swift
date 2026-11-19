@@ -1,4 +1,5 @@
 import ConnectionKit
+import DockyardCore
 import Foundation
 
 /// What the terminal drawer needs from a remote shell. `ShellChannel` is the real one; `DemoShell` fakes one for screenshots.
@@ -7,6 +8,8 @@ protocol ShellBackend: Sendable {
     func write(_ data: Data) async throws
     func resize(cols: Int, rows: Int) async throws
     func close() async
+    /// Calls `handler` once the automatic `su -` / `sudo -i` has produced its new shell. False when none is starting.
+    func onElevated(_ handler: @escaping @Sendable () -> Void) -> Bool
 }
 
 extension ShellChannel: ShellBackend {}
@@ -15,7 +18,13 @@ extension ShellChannel: ShellBackend {}
 final class DemoShell: ShellBackend, @unchecked Sendable {
     private struct State {
         var line = ""
+        /// True after an editor command reported to Dockyard: input is a silent reply line, like the real shell function.
+        var waiting = false
+        /// Phase two of the editor hook: the script body is being read (like `cat`) until Ctrl-D.
+        var slurping = false
         var cwd: String
+        /// 0 outside an escape sequence, 1 after ESC, 2 inside `ESC [` or `ESC O`.
+        var escape = 0
     }
 
     let output: AsyncStream<Data>
@@ -46,9 +55,50 @@ final class DemoShell: ShellBackend, @unchecked Sendable {
 
     func close() async { continuation.finish() }
 
+    func onElevated(_ handler: @escaping @Sendable () -> Void) -> Bool { false }
+
     // MARK: Typing
 
     private func handle(_ byte: UInt8) {
+        // Arrow keys and the like arrive as escape sequences; this shell has no line editor, so it drops them.
+        let inEscape = state.withLock { s -> Bool in
+            switch (s.escape, byte) {
+            case (0, 27): s.escape = 1
+            case (1, 91), (1, 79): s.escape = 2
+            case (1, _): s.escape = 0
+            case (2, 0x40...0x7E): s.escape = 0
+            case (2, _): break
+            default: return false
+            }
+            return true
+        }
+        if inEscape { return }
+        if state.withLock({ $0.slurping }) {
+            if byte == 4 {
+                state.withLock { $0.slurping = false }
+                emit("\u{1B}]7734;ready\u{07}" + prompt())
+            }
+            return
+        }
+        if state.withLock({ $0.waiting }) {
+            switch byte {
+            case 13, 10:
+                let reply = state.withLock { s -> String in
+                    defer { s.line = ""; s.waiting = false }
+                    return s.line
+                }
+                if reply != "e" { emit("[demo: the real editor would run here]\r\n") }
+                emit(prompt())
+            case 3:
+                state.withLock { $0.line = ""; $0.waiting = false }
+                emit("^C\r\n" + prompt())
+            case 32...126:
+                state.withLock { $0.line.append(Character(UnicodeScalar(byte))) }
+            default:
+                break
+            }
+            return
+        }
         switch byte {
         case 13, 10:
             let line = state.withLock { s -> String in
@@ -57,6 +107,10 @@ final class DemoShell: ShellBackend, @unchecked Sendable {
             }
             emit("\r\n")
             run(line.trimmingCharacters(in: .whitespaces))
+        case 21:
+            // Ctrl-U: the line is cleared.
+            state.withLock { $0.line = "" }
+            emit("\r\u{1B}[2K" + prompt())
         case 127, 8:
             let removed = state.withLock { s -> Bool in
                 guard !s.line.isEmpty else { return false }
@@ -78,6 +132,17 @@ final class DemoShell: ShellBackend, @unchecked Sendable {
 
     private func run(_ line: String) {
         let words = line.split(separator: " ", maxSplits: 1).map(String.init)
+        if line.contains("7734;go") {
+            // Dockyard's injection line: report go, then swallow the script body until Ctrl-D and report ready.
+            state.withLock { $0.slurping = true }
+            emit("\u{1B}]7734;go\u{07}")
+            return
+        }
+        if let report = editorReport(line) {
+            state.withLock { $0.waiting = true }
+            emit(report)
+            return
+        }
         switch words.first ?? "" {
         case "":
             break
@@ -96,6 +161,29 @@ final class DemoShell: ShellBackend, @unchecked Sendable {
             emit("bash: \(words[0]): command not found\r\n")
         }
         emit(prompt())
+    }
+
+    /// What the shell functions Dockyard defines would print for `nano file`, `sudo vim file`, `sudoedit file` or `crontab -e`.
+    private func editorReport(_ line: String) -> String? {
+        var words = line.split(separator: " ").map { String($0).trimmingCharacters(in: CharacterSet(charactersIn: "'\"")) }
+        guard let first = words.first else { return nil }
+        let kind: String
+        if first == "crontab", words == ["crontab", "-e"] {
+            kind = "crontab"
+        } else if first == "sudoedit" {
+            kind = "sudo"
+        } else if first == "sudo", words.count > 1, words[1] == "-e" || EditorShellHook.editors.contains(words[1]) {
+            kind = "sudo"
+        } else if EditorShellHook.editors.contains(first) {
+            kind = "edit"
+        } else {
+            return nil
+        }
+        let name = words.removeFirst()
+        let cwd = state.withLock { $0.cwd }
+        let who = "\(elevated ? "root" : user)@\(host)"
+        let fields = [kind, name, who, cwd, String(words.count)] + words
+        return "\u{1B}]\(EditorShellHook.requestOSC);" + fields.joined(separator: "\u{7F}") + "\u{07}"
     }
 
     private func prompt() -> String {

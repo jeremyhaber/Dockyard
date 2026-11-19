@@ -2,7 +2,7 @@ import ConnectionKit
 import DockyardCore
 import SwiftUI
 
-/// ⌘F bar above the server file list: name or content search under the current folder.
+/// ⌥⌘F bar above the server file list: name or content search under the current folder.
 struct SearchBar: View {
     @Environment(AppModel.self) private var app
     let pane: PaneModel
@@ -41,6 +41,12 @@ private struct SearchBarContent: View {
                 .frame(width: 150)
                 .disabled(!session.shellAvailable)
                 .help(session.shellAvailable ? "Search file names or what is inside files" : "Searching inside files needs an SSH connection")
+                if !model.byContent {
+                    Toggle("Folders", isOn: $model.foldersOnly)
+                        .toggleStyle(.button)
+                        .controlSize(.small)
+                        .help("Find folders only")
+                }
                 Toggle("Aa", isOn: $model.caseSensitive)
                     .toggleStyle(.button)
                     .controlSize(.small)
@@ -124,18 +130,18 @@ struct SearchResults: View {
                         TableColumn("Path") { hit in
                             VStack(alignment: .leading, spacing: 0) {
                                 Text(hit.name).font(.system(size: 12))
-                                Text(RemotePath.parent(of: hit.path)).font(.system(size: 10)).foregroundStyle(Palette.textSecondary)
+                                Text(RemotePath.parent(of: hit.path)).font(.system(size: 10)).foregroundStyle(.secondary)
                                     .lineLimit(1).truncationMode(.head)
                             }
                         }
                         TableColumn("Size") { hit in
                             Text(hit.isDirectory == true ? "\u{2014}" : FileDisplay.size(hit.size))
-                                .font(.system(size: 11)).foregroundStyle(Palette.textSecondary)
+                                .font(.system(size: 11)).foregroundStyle(.secondary)
                         }
                         .width(70)
                         TableColumn("Modified") { hit in
                             Text(hit.modified.map { FileDisplay.modifiedCompact($0) } ?? "")
-                                .font(.system(size: 11)).foregroundStyle(Palette.textSecondary)
+                                .font(.system(size: 11)).foregroundStyle(.secondary)
                         }
                         .width(110)
                     }

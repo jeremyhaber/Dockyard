@@ -91,6 +91,7 @@ struct SiteDraft {
     var keepVersionsOnOverwrite = false
     var trashOnDelete = false
     var verifyChecksums = false
+    var shellFolderDelete = true
     var transferFilters = ""
     var defaultConflict = ConflictPolicy.ask
     var maxConnections = Connection.defaultMaxConnections
@@ -156,6 +157,7 @@ struct SiteDraft {
         keepVersionsOnOverwrite = c.keepVersionsOnOverwrite
         trashOnDelete = c.trashOnDelete
         verifyChecksums = c.verifyChecksums
+        shellFolderDelete = c.shellFolderDelete
         transferFilters = c.transferFilters.joined(separator: "\n")
         defaultConflict = c.defaultConflictAction ?? .ask
         maxConnections = c.maxConnections
@@ -235,6 +237,7 @@ struct SiteDraft {
         c.keepVersionsOnOverwrite = keepVersionsOnOverwrite
         c.trashOnDelete = trashOnDelete
         c.verifyChecksums = proto == .sftp && verifyChecksums
+        c.shellFolderDelete = shellFolderDelete
         c.transferFilters = transferFilters.split(whereSeparator: \.isNewline)
             .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
         c.defaultConflictAction = defaultConflict == .ask ? nil : defaultConflict

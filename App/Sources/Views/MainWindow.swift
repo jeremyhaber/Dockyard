@@ -56,6 +56,9 @@ struct MainWindow: View {
             if let session = app.activeSession { CompareSheet(session: session) }
         }
         .sheet(item: versionsBinding) { session in VersionsSheet(session: session) }
+        .sheet(item: cronBinding) { session in
+            if let runner = app.cronRunner(for: session) { CronSheet(session: session, runner: runner) }
+        }
         .sheet(item: webURLBinding) { request in WebURLRequestSheet(request: request) }
         .background(WindowAccessor { window in DemoWindows.register("main", window) })
         .frame(minWidth: 980, minHeight: 620)
@@ -69,6 +72,10 @@ struct MainWindow: View {
 
     private var versionsBinding: Binding<ConnectionSession?> {
         Binding(get: { app.versionsSession }, set: { if $0 == nil { app.safety.versionsSessionID = nil } })
+    }
+
+    private var cronBinding: Binding<ConnectionSession?> {
+        Binding(get: { app.cronSession }, set: { if $0 == nil { app.safety.cronSessionID = nil } })
     }
 
     private var webURLBinding: Binding<WebURLRequest?> {
@@ -275,6 +282,8 @@ struct ConnectionTab: View {
             Divider()
             Button("Versions\u{2026}") { app.showVersions(for: session) }
                 .disabled(!session.status.isConnected)
+            Button("Edit Cron Jobs\u{2026}") { app.openCronEditor(for: session) }
+                .disabled(!app.canEditCron(session))
             if app.canOpenCPanel(session.connection) {
                 Button("Open cPanel") { app.openCPanel(for: session.connection) }
             }

@@ -835,6 +835,19 @@ final class AppModel {
 
     // MARK: Drawer
 
+    /// Opens the Terminal tab on a new shell for the active connection.
+    func newShell() {
+        guard let session = activeSession, session.shellAvailable else { return }
+        session.newTerminal()
+        drawerTab = .terminal
+        drawerVisible = true
+    }
+
+    func closeActiveShell() {
+        guard let session = activeSession else { return }
+        session.closeTerminal(session.activeTerminal)
+    }
+
     func toggleDrawer(tab: DrawerTab) {
         if drawerVisible && drawerTab == tab {
             drawerVisible = false

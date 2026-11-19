@@ -3,6 +3,9 @@ import Foundation
 public protocol RemoteFileSystem: Sendable {
     func connect() async throws
     func list(_ path: String) async throws -> [RemoteItem]
+    /// The listing of `path` as it arrives, so a huge folder can show before it is complete.
+    /// The default sends the whole `list` result at once.
+    func listStream(_ path: String) -> AsyncThrowingStream<ListingUpdate, Error>
     /// Resumes from the size of an existing partial local file when `resume` is true.
     func download(_ remote: String, to local: URL, progress: Progress, resume: Bool) async throws
     /// Resumes from the size of an existing partial remote file when `resume` is true.
@@ -22,7 +25,61 @@ public protocol RemoteFileSystem: Sendable {
     var supportsShell: Bool { get }
 }
 
+/// One step of a streamed listing. Apply them in order with `ListingAccumulator`.
+public enum ListingUpdate: Sendable, Equatable {
+    /// More entries. An entry whose path was already sent replaces it (a listing retried after a dropped connection).
+    case added([RemoteItem])
+    /// Entries already sent, with detail filled in later (a symlink's target and whether it points at a folder).
+    case updated([RemoteItem])
+}
+
+/// Folds `ListingUpdate`s into a listing, keeping the order entries arrived in.
+public struct ListingAccumulator: Sendable {
+    public private(set) var items: [RemoteItem] = []
+    private var index: [String: Int] = [:]
+
+    public init() {}
+
+    public mutating func apply(_ update: ListingUpdate) {
+        switch update {
+        case .added(let new):
+            items.reserveCapacity(items.count + new.count)
+            for item in new {
+                if let i = index[item.path] {
+                    items[i] = item
+                } else {
+                    index[item.path] = items.count
+                    items.append(item)
+                }
+            }
+        case .updated(let changed):
+            for item in changed { if let i = index[item.path] { items[i] = item } }
+        }
+    }
+}
+
 extension RemoteFileSystem {
+    public func listStream(_ path: String) -> AsyncThrowingStream<ListingUpdate, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    continuation.yield(.added(try await list(path)))
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
+    /// Collects `listStream` into a full listing.
+    public func collectListing(_ path: String) async throws -> [RemoteItem] {
+        var listing = ListingAccumulator()
+        for try await update in listStream(path) { listing.apply(update) }
+        return listing.items
+    }
+
     public func download(_ remote: String, to local: URL, progress: Progress) async throws {
         try await download(remote, to: local, progress: progress, resume: false)
     }

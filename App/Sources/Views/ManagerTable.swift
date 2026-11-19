@@ -21,6 +21,17 @@ final class ManagerNSTableView: NSTableView {
 final class FavoriteCellView: NSTableCellView {
     let button = NSButton()
 
+    /// The amber star is a pale yellow on accent blue; show it white on an emphasized row.
+    var starTint: NSColor = .tertiaryLabelColor { didSet { applyTint() } }
+
+    override var backgroundStyle: NSView.BackgroundStyle {
+        didSet { applyTint() }
+    }
+
+    private func applyTint() {
+        button.contentTintColor = backgroundStyle == .emphasized ? .alternateSelectedControlTextColor : starTint
+    }
+
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         button.translatesAutoresizingMaskIntoConstraints = false
@@ -37,8 +48,13 @@ final class FavoriteCellView: NSTableCellView {
 }
 
 final class TwoLineCellView: NSTableCellView {
-    let title = NSTextField(labelWithString: "")
-    let subtitle = NSTextField(labelWithString: "")
+    let title = InkLabel(labelWithString: "")
+    let subtitle = InkLabel(labelWithString: "")
+
+    override var backgroundStyle: NSView.BackgroundStyle {
+        didSet { applySelectionInk(emphasized: backgroundStyle == .emphasized) }
+    }
+
     /// The site's icon; SwiftUI so it loads in the background and updates when the favicon arrives.
     let icon = NSHostingView<SiteIcon?>(rootView: nil)
 
@@ -215,7 +231,7 @@ final class ManagerTableCoordinator: NSObject, NSTableViewDataSource, NSTableVie
             cell.button.image = NSImage(
                 systemSymbolName: c.favorite ? "star.fill" : "star",
                 accessibilityDescription: c.favorite ? "Favorite" : "Not a favorite")
-            cell.button.contentTintColor = c.favorite ? NSColor(Palette.statusAmber) : .tertiaryLabelColor
+            cell.starTint = c.favorite ? NSColor(Palette.statusAmber) : .tertiaryLabelColor
             cell.button.tag = row
             return cell
         case "name":

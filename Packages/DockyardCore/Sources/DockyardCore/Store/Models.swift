@@ -128,6 +128,8 @@ public struct Connection: Sendable, Hashable, Identifiable {
     /// Blocks uploads, deletes, renames, chmod and extract.
     public var readOnly: Bool
     public var verifyChecksums: Bool
+    /// SFTP: deletes folders with one `rm -rf` over SSH instead of file by file. On by default.
+    public var shellFolderDelete: Bool
     /// Another saved connection to tunnel through (ProxyJump). Chains follow the referenced connection's own jump host.
     public var jumpHost: UUID?
     public var pinnedFolders: [PinnedFolder]
@@ -202,6 +204,7 @@ public struct Connection: Sendable, Hashable, Identifiable {
         keepVersionsOnOverwrite: Bool = false,
         readOnly: Bool = false,
         verifyChecksums: Bool = false,
+        shellFolderDelete: Bool = true,
         jumpHost: UUID? = nil,
         pinnedFolders: [PinnedFolder] = [],
         transferFilters: [String] = [],
@@ -253,6 +256,7 @@ public struct Connection: Sendable, Hashable, Identifiable {
         self.keepVersionsOnOverwrite = keepVersionsOnOverwrite
         self.readOnly = readOnly
         self.verifyChecksums = verifyChecksums
+        self.shellFolderDelete = shellFolderDelete
         self.jumpHost = jumpHost
         self.pinnedFolders = pinnedFolders
         self.transferFilters = transferFilters
@@ -343,6 +347,7 @@ extension Connection: FetchableRecord, PersistableRecord, TableRecord {
             keepVersionsOnOverwrite: row["keepVersionsOnOverwrite"],
             readOnly: row["readOnly"],
             verifyChecksums: row["verifyChecksums"],
+            shellFolderDelete: row["shellFolderDelete"],
             jumpHost: (row["jumpHost"] as String?).flatMap { UUID(uuidString: $0) },
             pinnedFolders: Self.decodeJSON(row["pinnedFolders"], default: []),
             transferFilters: Self.decodeJSON(row["transferFilters"], default: []),
@@ -415,6 +420,7 @@ extension Connection: FetchableRecord, PersistableRecord, TableRecord {
         container["keepVersionsOnOverwrite"] = keepVersionsOnOverwrite
         container["readOnly"] = readOnly
         container["verifyChecksums"] = verifyChecksums
+        container["shellFolderDelete"] = shellFolderDelete
         container["jumpHost"] = jumpHost?.uuidString
         container["pinnedFolders"] = String(decoding: try JSONEncoder().encode(pinnedFolders), as: UTF8.self)
         container["transferFilters"] = String(decoding: try JSONEncoder().encode(transferFilters), as: UTF8.self)

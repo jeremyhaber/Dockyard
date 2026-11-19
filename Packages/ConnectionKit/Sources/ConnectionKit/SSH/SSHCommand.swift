@@ -40,19 +40,29 @@ struct ExecMarkerFilter {
 }
 
 extension SSHSession {
-    private static func supervised(_ command: String) -> String {
+    private static func supervised(_ command: String, keepStdin: Bool = false) -> String {
         let marker = "pg=$(ps -o pgid= -p $$ 2>/dev/null | tr -d ' '); printf '\(ExecMarkerFilter.prefix)%s:%s\\n' \"$$\" \"${pg:-$$}\""
-        return "\(marker); exec sh -c \(ShellQuote.quote(command)) </dev/null"
+        return "\(marker); exec sh -c \(ShellQuote.quote(command))\(keepStdin ? "" : " </dev/null")"
     }
 
     /// Runs `command` under `sh -c` in a supervised process and streams its output, ending with the exit
     /// status. Cancelling the consuming task (or dropping the stream) sends TERM, then KILL, to the whole
     /// remote process group. With `elevation` the command runs as root through `su`/`sudo`.
-    public func execStream(_ command: String, elevation: ShellElevation? = nil) -> AsyncThrowingStream<SSHExecEvent, Error> {
+    ///
+    /// With `stdin` the bytes are sent on the channel and EOF follows. Over `su` the channel is a PTY, which
+    /// cannot carry a clean EOF, so there the bytes travel base64-encoded inside the command instead.
+    public func execStream(_ command: String, elevation: ShellElevation? = nil, stdin: Data? = nil) -> AsyncThrowingStream<SSHExecEvent, Error> {
+        var command = command
+        var channelInput = stdin
+        if let stdin, elevation?.kind == .su {
+            command = "printf %s \(ShellQuote.quote(stdin.base64EncodedString())) | base64 -d | { \(command)\n}"
+            channelInput = nil
+        }
+        let script = Self.supervised(command, keepStdin: channelInput != nil)
         let (stream, continuation) = AsyncThrowingStream<SSHExecEvent, Error>.makeStream()
         let task = Task { [self] in
             do {
-                let status = try await runChannel(Self.supervised(command), elevation: elevation, supervise: true) { continuation.yield($0) }
+                let status = try await runChannel(script, elevation: elevation, supervise: true, stdin: channelInput) { continuation.yield($0) }
                 continuation.yield(.exit(status))
                 continuation.finish()
             } catch {
@@ -64,7 +74,7 @@ extension SSHSession {
     }
 
     private func runChannel(
-        _ script: String, elevation: ShellElevation?, supervise: Bool,
+        _ script: String, elevation: ShellElevation?, supervise: Bool, stdin: Data? = nil,
         onOutput: @escaping @Sendable (SSHExecEvent) -> Void
     ) async throws -> Int32 {
         let kind = elevation?.kind ?? .none
@@ -83,7 +93,10 @@ extension SSHSession {
                     try channel.requestPTY(cols: 200, rows: 24, term: "dumb")
                     try channel.exec("su root -c \(ShellQuote.quote("stty raw -echo; " + wrapped))")
                 }
-                if kind != .su { try channel.sendEOF() }
+                if kind != .su {
+                    if let stdin { try channel.write(Array(stdin)) }
+                    try channel.sendEOF()
+                }
             } catch {
                 channel.close()
                 throw error

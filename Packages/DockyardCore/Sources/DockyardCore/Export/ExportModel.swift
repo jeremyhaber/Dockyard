@@ -107,6 +107,8 @@ struct ExportPayload: Codable {
         var keepVersionsOnOverwrite: Bool
         var readOnly: Bool
         var verifyChecksums: Bool
+        /// Optional so exports from before the setting still decode (as on).
+        var shellFolderDelete: Bool?
         var jumpHost: UUID?
         var pinnedFolders: [PinnedFolder]
         var transferFilters: [String]
@@ -128,7 +130,7 @@ struct ExportPayload: Codable {
             mountInFinder = c.mountInFinder; mountOnLaunch = c.mountOnLaunch; mountReadOnly = c.mountReadOnly
             createdAt = c.createdAt; initialRemotePath = c.initialRemotePath
             trashOnDelete = c.trashOnDelete; keepVersionsOnOverwrite = c.keepVersionsOnOverwrite; readOnly = c.readOnly
-            verifyChecksums = c.verifyChecksums; jumpHost = c.jumpHost; pinnedFolders = c.pinnedFolders
+            verifyChecksums = c.verifyChecksums; shellFolderDelete = c.shellFolderDelete; jumpHost = c.jumpHost; pinnedFolders = c.pinnedFolders
             transferFilters = c.transferFilters; webURLs = c.webURLs; icon = c.icon; color = c.color; faviconSite = c.faviconSite
             treeRoot = c.treeRoot; loginUser = c.loginUser
         }
@@ -143,7 +145,7 @@ struct ExportPayload: Codable {
                 mountInFinder: mountInFinder, mountOnLaunch: mountOnLaunch, mountReadOnly: mountReadOnly,
                 createdAt: createdAt, initialRemotePath: initialRemotePath, treeRoot: treeRoot ?? .home, trashOnDelete: trashOnDelete,
                 keepVersionsOnOverwrite: keepVersionsOnOverwrite, readOnly: readOnly, verifyChecksums: verifyChecksums,
-                jumpHost: jumpHost, pinnedFolders: pinnedFolders, transferFilters: transferFilters,
+                shellFolderDelete: shellFolderDelete ?? true, jumpHost: jumpHost, pinnedFolders: pinnedFolders, transferFilters: transferFilters,
                 webURLs: webURLs ?? [], icon: icon, color: color, faviconSite: faviconSite)
             c.loginUser = loginUser
             return c

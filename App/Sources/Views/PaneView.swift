@@ -27,14 +27,15 @@ struct PaneView: View {
             PathBar(pane: pane, session: session)
             Divider()
             if pane.side == .server { PinsBar(pane: pane, session: session) }
-            FolderTreeView(pane: pane, session: session, version: pane.treeSignature)
+            FolderTreeView(pane: pane, session: session, version: pane.treeSignature, loading: pane.loadingPaths)
                 .frame(height: shown)
             TreeResizeHandle(height: shown) { treeHeight = $0 }
             FolderTabsBar(pane: pane)
             Divider()
+            if pane.findOpen { PaneFindBar(pane: pane, session: session) }
             if pane.side == .server { SearchBar(pane: pane, session: session) }
             ZStack {
-                FileTableView(pane: pane, session: session, version: pane.rowsVersion, sort: pane.sort)
+                FileTableView(pane: pane, session: session, version: pane.rowsVersion, sort: pane.sort, find: pane.findSignature(for: .files))
                     .frame(minHeight: TreeLayout.minListHeight)
                 if pane.side == .server { SearchResults(session: session) }
                 if let message = pane.errorMessage {
@@ -143,6 +144,123 @@ struct FolderTabsBar: View {
         guard pane.state.tabs.indices.contains(pane.activeTabIndex) else { return }
         let id = pane.state.tabs[pane.activeTabIndex].id
         withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(id) }
+    }
+}
+
+/// Find in a pane, started by typing in the file list or folder tree (or ⌘F). Works like a browser's find on a page:
+/// every row stays visible, matches are highlighted and Return / Shift-Return step through them.
+private struct PaneFindBar: View {
+    @Environment(AppModel.self) private var app
+    let pane: PaneModel
+    let session: ConnectionSession
+    @FocusState private var focused: Bool
+
+    private var folders: Bool { pane.findScope == .folders }
+    private var hasText: Bool { !NameFilter.normalized(pane.findText).isEmpty }
+    private var offersServerSearch: Bool { pane.side == .server && session.fs != nil && hasText }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 4) {
+                field
+                iconButton("chevron.up", "Previous match (\u{21E7}Return)") { pane.findStep(forward: false) }
+                    .disabled(pane.findMatches.isEmpty)
+                iconButton("chevron.down", "Next match (Return)") { pane.findStep(forward: true) }
+                    .disabled(pane.findMatches.isEmpty)
+                iconButton("xmark", "Close (Esc)") { close() }
+            }
+            .padding(.horizontal, 6)
+            .frame(height: 28)
+            if offersServerSearch {
+                Button(action: searchServer) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "server.rack").font(.system(size: 9))
+                        Text(folders
+                             ? "Search the server for folders named \u{201C}\(NameFilter.normalized(pane.findText))\u{201D}"
+                             : "Search subfolders on the server for \u{201C}\(NameFilter.normalized(pane.findText))\u{201D}")
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                    .font(.system(size: 11))
+                    .foregroundStyle(Color.accentColor)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 10)
+                .padding(.bottom, 5)
+                .help(folders
+                      ? "Finds folders anywhere under \(pane.tree.root.path), including ones the tree has not loaded"
+                      : "Finds files in \(pane.currentPath) and every folder below it")
+            }
+            Divider()
+        }
+        .background(Palette.chrome)
+        .onAppear(perform: focus)
+        .onChange(of: pane.findFocusToken) { focus() }
+    }
+
+    private var field: some View {
+        HStack(spacing: 4) {
+            Image(systemName: folders ? "folder" : "magnifyingglass")
+                .font(.system(size: 10))
+                .foregroundStyle(Palette.textSecondary)
+            TextField(folders ? "Find folder, e.g. wp-*" : "Find file, e.g. *.php",
+                      text: Binding(get: { pane.findText }, set: { pane.setFindText($0) }))
+                .textFieldStyle(.plain)
+                .font(.system(size: 12))
+                .focused($focused)
+                .onKeyPress(.return, phases: .down) { press in
+                    pane.findStep(forward: !press.modifiers.contains(.shift))
+                    return .handled
+                }
+                .onExitCommand { close() }
+                .accessibilityLabel(folders ? "Find folder" : "Find file")
+                .help("Text matches anywhere in a name. * ? and [a-z] match whole names, e.g. *.php or wp-*")
+            Text(pane.findStatus)
+                .font(.system(size: 10).monospacedDigit())
+                .foregroundStyle(pane.findMatches.isEmpty && hasText ? Palette.statusAmber : Palette.textSecondary)
+                .lineLimit(1)
+                .fixedSize()
+        }
+        .padding(.horizontal, 6)
+        .frame(maxWidth: .infinity)
+        .frame(height: 22)
+        .background(Palette.ground, in: RoundedRectangle(cornerRadius: 5))
+        .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(focused ? Color.accentColor.opacity(0.6) : Palette.border))
+    }
+
+    private func iconButton(_ symbol: String, _ help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 10, weight: .semibold))
+                .frame(width: 20, height: 20)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.borderless)
+        .help(help)
+        .accessibilityLabel(help)
+    }
+
+    /// Typing that started in the list keeps going: the caret goes after the text instead of selecting it.
+    private func focus() {
+        focused = true
+        guard pane.findCaretAtEnd else { return }
+        DispatchQueue.main.async {
+            guard let editor = NSApp.keyWindow?.firstResponder as? NSTextView else { return }
+            editor.setSelectedRange(NSRange(location: (editor.string as NSString).length, length: 0))
+        }
+    }
+
+    private func close() {
+        focused = false
+        pane.closeFind()
+    }
+
+    private func searchServer() {
+        let root = folders ? pane.tree.root.path : pane.currentPath
+        app.searchServer(for: pane.findText, under: root, foldersOnly: folders, in: session)
+        pane.closeFind(land: false)
     }
 }
 

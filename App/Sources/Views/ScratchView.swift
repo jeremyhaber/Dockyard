@@ -56,7 +56,8 @@ struct ScratchView: View {
                 let urgent = item.expires.timeIntervalSince(center.now) < 3600
                 VStack(alignment: .leading, spacing: 3) {
                     Text(center.timeLeft(item))
-                        .foregroundStyle(urgent ? Palette.statusAmber : .primary)
+                        // Amber vanishes on the accent-blue selected row, so the selected row keeps the default colour.
+                        .foregroundStyle(urgent && !center.selection.contains(item.url) ? Palette.statusAmber : .primary)
                     ProgressView(value: left)
                         .progressViewStyle(.linear)
                         .tint(urgent ? Palette.statusAmber : Palette.statusGreen)

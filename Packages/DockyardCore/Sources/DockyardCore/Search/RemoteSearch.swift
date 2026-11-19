@@ -15,16 +15,19 @@ public struct SearchQuery: Sendable, Equatable {
     public var caseSensitive: Bool
     /// Content search only: a glob such as `*.php`.
     public var nameFilter: String?
+    /// Name search only: return folders, not files.
+    public var foldersOnly: Bool
     public var limit: Int
 
     public static let defaultLimit = 5_000
 
-    public init(mode: Mode, text: String, root: String, caseSensitive: Bool = false, nameFilter: String? = nil, limit: Int = SearchQuery.defaultLimit) {
+    public init(mode: Mode, text: String, root: String, caseSensitive: Bool = false, nameFilter: String? = nil, foldersOnly: Bool = false, limit: Int = SearchQuery.defaultLimit) {
         self.mode = mode
         self.text = text
         self.root = root
         self.caseSensitive = caseSensitive
         self.nameFilter = nameFilter
+        self.foldersOnly = foldersOnly
         self.limit = limit
     }
 
@@ -76,7 +79,7 @@ public enum SearchEvent: Sendable, Equatable {
     case finished(SearchSummary)
 }
 
-/// ⌘F search in the server pane. SFTP runs `find` / `grep -rIl` on the server; other backends walk listings
+/// ⌥⌘F search in the server pane. SFTP runs `find` / `grep -rIl` on the server; other backends walk listings
 /// (name search only). The stream always ends with `.finished`. Cancel by cancelling the consuming task or
 /// dropping the stream; the remote process is killed.
 public enum RemoteSearch {
@@ -134,7 +137,7 @@ private struct WalkSearch {
             scanned += 1
             emit(.progress(SearchProgress(foldersScanned: scanned, currentFolder: folder)))
             for item in items where item.name != "." && item.name != ".." {
-                if Glob.matches(pattern, item.name, caseInsensitive: !query.caseSensitive) {
+                if !query.foldersOnly || item.isDirectory, Glob.matches(pattern, item.name, caseInsensitive: !query.caseSensitive) {
                     hits += 1
                     emit(.hit(SearchHit(path: item.path, isDirectory: item.isDirectory, size: item.size, modified: item.modified)))
                     if hits >= query.limit { return SearchSummary(hits: hits, truncated: true, cancelled: false, usedShell: false, error: nil) }
@@ -207,7 +210,9 @@ private struct ShellSearch {
     private var root: String { query.root.hasPrefix("-") ? "./" + query.root : query.root }
 
     private func findArguments(printFormat: Bool) -> [String] {
-        var args = ["find", root, query.caseSensitive ? "-name" : "-iname", query.namePattern]
+        var args = ["find", root]
+        if query.foldersOnly { args += ["-type", "d"] }
+        args += [query.caseSensitive ? "-name" : "-iname", query.namePattern]
         args += printFormat ? ["-printf", "%y\\0%s\\0%T@\\0%p\\0"] : ["-print0"]
         return args
     }

@@ -284,6 +284,17 @@ enum DemoSeeder {
             app.drawerVisible = true
         case "versions":
             if let acme { app.showVersions(for: acme) }
+        case "cron":
+            if let bluebird { app.openCronEditor(for: bluebird) }
+        case "find", "findFolders":
+            guard let acme, let server = acme.server else { return }
+            server.navigate(to: "/home/acme/public_html")
+            let folders = DemoMode.screen == "findFolders"
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 1_200_000_000)
+                server.startFind(typing: folders ? "wp-*" : "*.php", scope: folders ? .folders : .files)
+                server.findStep(forward: true)
+            }
         case "search":
             guard let acme else { return }
             let www = "/home/acme/public_html"
@@ -339,8 +350,46 @@ enum DemoSeeder {
             await app.seedRemovedDemo()
         case "quickLook":
             await app.showQuickLookDemo()
+        case "terminalEditorCheck", "terminalEditorNginx":
+            guard let bluebird else { return }
+            app.activate(bluebird)
+            app.drawerTab = .terminal
+            app.drawerVisible = true
+            app.drawerHeight = 340
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                let terminal = bluebird.activeTerminal
+                if DemoMode.screen == "terminalEditorCheck" {
+                    _ = await terminal.openInlineEditor("/home/bluebird/public_html/contact.php")
+                    await terminal.editor?.checkNow()
+                } else {
+                    _ = await terminal.openInlineEditor("/etc/nginx/nginx.conf")
+                    if let editor = terminal.editor {
+                        editor.view.textView.insertText("    gzip on;\n", replacementRange: NSRange(location: 0, length: 0))
+                        await editor.save()
+                    }
+                }
+            }
+        case "terminalEditor", "terminalEditorUnsaved":
+            guard let bluebird else { return }
+            app.activate(bluebird)
+            app.drawerTab = .terminal
+            app.drawerVisible = true
+            app.drawerHeight = 340
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                let terminal = bluebird.activeTerminal
+                _ = await terminal.openInlineEditor("/home/bluebird/public_html/wp-config.php", line: 14)
+                if DemoMode.screen == "terminalEditorUnsaved", let editor = terminal.editor {
+                    editor.view.textView.insertText("define( 'WP_DEBUG_LOG', true );\n", replacementRange: editor.view.textView.selectedRange())
+                    editor.requestClose()
+                }
+            }
         case "terminal":
-            if let bluebird { app.activate(bluebird) }
+            if let bluebird {
+                app.activate(bluebird)
+                if bluebird.shellAvailable, bluebird.terminals.count < 2 { bluebird.newTerminal() }
+            }
             app.drawerTab = .terminal
             app.drawerVisible = true
         case "sideBySideColumns":
